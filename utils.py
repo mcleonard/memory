@@ -3,7 +3,7 @@
 import numpy as np
 from functools import wraps
 import matplotlib.pyplot as plt   
-import mycode as my 
+import memory as my 
 
 def line_hist(data, **kwargs):
     ''' Plot a histogram as a line plot instead of a bar plot.  Accepts any keyword 

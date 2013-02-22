@@ -2,8 +2,8 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
-import mycode as my
-from mycode.constants import *
+import memory as my
+from .constants import LEFT, RIGHT, WM, RM, HIT, ERROR
 
 def raster(unit, trialData, events = ['PG in', 'FG in'], 
            axis = None, sort_by= 'PG in', prange = None):
@@ -192,7 +192,7 @@ def cross_scatter(x, y, xerr, yerr, p_x, p_y, **kwargs):
     ax = fig.add_subplot(111)
     
     sig_level = kwargs.get('sig_level', 0.5)
-    sigs = my.analyze.p_value_sig(p_x,p_y,sig_p=sig_level)
+    sigs = p_value_sig(p_x,p_y,sig_p=sig_level)
     
     # Then plot units that are significant for working and reference memory
     xbars = np.abs(xerr - x)

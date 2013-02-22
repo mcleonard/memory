@@ -1,11 +1,11 @@
 ''' A module for dealing with Side Selectivity Index analysis '''
 
 import numpy as np
-import mycode.analyze as al
-from mycode.constants import LEFT, RIGHT, HIT, ERROR, RM, WM
-from stats import *
+import memory.analyze as al
+from memory.bhv import LEFT, RIGHT, HIT, ERROR, RM, WM
+from memory.stats import *
 import matplotlib.pyplot as plt
-from mycode.utils import memoize
+from memory.utils import memoize
 from scipy.stats import ttest_1samp, ttest_ind
 
 class unitSSI(object):
