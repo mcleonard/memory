@@ -58,7 +58,7 @@ def raster(unit, trialData, events = ['PG in', 'FG in'],
         ax.scatter(data, np.arange(0,len(data)), c=event_colors[event],
                    edgecolor = 'none', marker='o')
     ax.plot([0,0], [0,len(srtdata)], color = 'grey') 
-    if range == None:
+    if prange == None:
         ax.set_xlim(srtdata['PG in'].mean()-3, srtdata['FG in'].mean()+1)
     else:
         ax.set_xlim(prange)
@@ -121,27 +121,35 @@ def basic_figs(unit, trialData, prange=(-10,3), smooth = False):
     return fig
 
 def confidence_sig(xerr, yerr):
+    ''' Returns a dictionary indicating significant data points, significance
+        being defined as 0 falling outside the confidence interval.
+
+        Arguments
+        ---------
+        xerr : 2d array
+            Lower and upper confidence intervals
+        yerr : 2d array
+            Lower and upper confidence intervals
+        
+        Returns
+        -------
+        sigs : dict
+            Keys => 'x', 'y', 'both', 'neither'
+            Values => indices of significant intervals
     
-    def is_sig(test, between):
-        is_it = (between[0] <= test) & (between[1] >= test)
-        return not is_it
+    '''
     
-    sig = dict.fromkeys(['x','y','both', 'neither'])
-    sigx = map(is_sig, repeat(0, xerr.shape[1]), xerr.T)
-    sigy = map(is_sig, repeat(0, yerr.shape[1]), yerr.T)
-    sig['x'] = set(find(sigx))
-    sig['y'] = set(find(sigy))
-    sig['both'] = sig['x'].intersection(sig['y'])
-    sig['neither'] = \
-        set(range(xerr.shape[1])).difference(sig['x'].union(sig['y']))
     
-    # I tried doing this with a for loop, but it didn't seem to work.
-    sig['x'] = np.array(list(sig['x']))
-    sig['y'] = np.array(list(sig['y']))
-    sig['both'] = np.array(list(sig['both']))
-    sig['neither'] = np.array(list(sig['neither']))
+    # If the error bounds are both negative or both positive, then 0 is not 
+    # between the error bounds. So multiplying the bounds give a positive 
+    # number if significant.
     
-    return sig
+    sigs = {'x':np.where((xerr.prod(axis=0)>0)&(yerr.prod(axis=0)<0))[0],
+            'y':np.where((xerr.prod(axis=0)<0)&(yerr.prod(axis=0)>0))[0],
+            'both':np.where((xerr.prod(axis=0)>0)&(yerr.prod(axis=0)>0))[0],
+            'neither':np.where((xerr.prod(axis=0)<0)&(yerr.prod(axis=0)<0))[0]}
+    
+    return sigs
     
 def p_value_sig(p_x, p_y, sig_p = 0.05):
     
@@ -152,7 +160,7 @@ def p_value_sig(p_x, p_y, sig_p = 0.05):
             'neither':np.where((p_x>sig_p)&(p_y>sig_p))[0]}
     return sigs
 
-def cross_scatter(x, y, xerr, yerr, p_x, p_y, **kwargs):
+def cross_scatter(x, y, xerr, yerr, p = None, **kwargs):
     '''  cross_scatter(x, y, xerr, yerr) -> list of bools, makes a figure
     
     Makes a scatter plot with error bars.  Colors data points based on
@@ -169,7 +177,8 @@ def cross_scatter(x, y, xerr, yerr, p_x, p_y, **kwargs):
     yerr : 2D array
         First row is the lower error bar, second row in the upper error bar
     p : array-like
-        Array of p-values for each data point.
+        Array of p-values for each data point. Can be a 2-dimensional 
+        list/tuple/array of p-values, e.g. p = (p_x, p_y).
     
     Keywords
     --------
