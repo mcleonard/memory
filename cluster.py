@@ -87,6 +87,7 @@ class Viewer(object):
         '''
         from itertools import combinations
         clusters = self._sanitizeClusters(clusters)
+        features = { k:self.clusters[k]['pca'] for k in clusters }
         # We say the 1st PCA component, but it is the 0th column in the data
         components = np.array(components) - 1
         
@@ -95,14 +96,24 @@ class Viewer(object):
         itercomps = combinations(components,2)
         for ii, (comp_1, comp_2) in enumerate(itercomps):
             ax = subplots[ii]
-            for k in clusters:
-                pca = self.clusters[k]['pca']
-                ax.scatter(pca[:,comp_1], pca[:,comp_2], 
-                           marker = '.', s = 10,
-                           facecolor = self._colors[k],
-                           edgecolor = 'face')
-                ax.set_xlabel('PCA component %d' % comp_1)
-                ax.set_ylabel('PCA component %d' % comp_2)
+            
+            xs = np.concatenate([feature[:, comp_1] 
+                                 for feature in features.itervalues()])
+            ys = np.concatenate([feature[:, comp_2] 
+                                 for feature in features.itervalues()])
+            colors = np.concatenate([[self._colors[k]]*len(x) 
+                                     for k, x in features.iteritems()])
+            
+            ax.scatter(xs, ys, marker = '.', s = 10, color = colors, edgecolor = 'face')
+            
+            #~ for k in clusters:
+                #~ pca = self.clusters[k]['pca']
+                #~ ax.scatter(pca[:,comp_1], pca[:,comp_2], 
+                           #~ marker = '.', s = 10,
+                           #~ facecolor = self._colors[k],
+                           #~ edgecolor = 'face')
+                #~ ax.set_xlabel('PCA component %d' % comp_1)
+                #~ ax.set_ylabel('PCA component %d' % comp_2)
         
         fig.tight_layout()
         fig.show()
@@ -152,12 +163,13 @@ class Viewer(object):
         fig, subplots = _createSubplots(2, len(clusters))
         
         # The waveforms are going to be separated into slices this long
-        SLICE = 30 
-        N_SAMPLES = 100
+        # SLICE = 30 
+        N_SAMPLES = 50
         # Build the x values to use in the plots
-        xs = np.concatenate([np.arange(SLICE)+ii*(SLICE+10) for ii in range(4)])
+        xs = np.arange(0, 120)
+        #xs = np.concatenate([np.arange(SLICE)+ii*(SLICE+10) for ii in range(4)])
         # And build the slices we'll take from the waveforms
-        slices = [(SLICE*ii, SLICE*(ii+1)) for ii in range(4)]
+        # slices = [(SLICE*ii, SLICE*(ii+1)) for ii in range(4)]
         
         waveforms = [ self.clusters[k]['waveforms'] for k in clusters ]
         means = [ np.mean(wf, axis=0) for wf in waveforms ]
@@ -166,13 +178,9 @@ class Viewer(object):
         
         def wf_plot(ax, waveforms, color):
             if len(np.shape(waveforms)) == 2:
-                plots = [ ax.plot(xs[start:end], waveforms[:,start:end].T, 
-                                  color = color, alpha = 0.3)
-                          for start, end in slices ]
+                plots = ax.plot(xs, waveforms.T, color = color, alpha = 0.3)
             elif len(np.shape(waveforms)) == 1:
-                plots = [ ax.plot(xs[start:end], waveforms[start:end].T, 
-                                  color = color)
-                          for start, end in slices ]
+                plots = ax.plot(xs, waveforms.T, color = color)
                 
         plot_var = [ wf_plot(ax, r_wf, c)
                      for ax, r_wf, c in zip(subplots, r_wfs, colors) ]
