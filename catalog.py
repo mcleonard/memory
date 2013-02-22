@@ -323,7 +323,7 @@ class Catalog(object):
     def query(self,*args, **kwargs):
         ''' Just to make things a little easier'''
         return self.connection.query(*args,**kwargs)
-        
+
 def calculate_rates(all_units):
     
     import os

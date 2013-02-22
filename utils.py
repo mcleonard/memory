@@ -30,20 +30,25 @@ def memoize(func):
             cache[args] = func(*args)
         return cache[args]
     return wrapper
+    
+def catalog_path():
+    ''' This function returns the relative path to the default catalog. '''
+    from os.path import expanduser, relpath
+    absolute = expanduser('~/Dropbox/Data/catalog.sqlite')
+    return '/'+relpath(absolute)
 
-def startup(catalog_file):
+def startup():
     ''' This function runs code that I do really often when I'm looking at data.
         I wrote this so I don't have to type it out every time.
         
-        Argument
-        --------
-        catalog_file : str, path
-            Relative path to the catalog database
+        Returns
+        -------
+        catalog, units, Timelock
     '''
-    from mycode.catalog import Catalog, Unit
+    from catalog import Catalog, Unit
     from os.path import expanduser
     
-    catalog = Catalog(catalog_file)
+    catalog = Catalog(catalog_path())
     units = catalog.query(Unit) \
                    .filter(Unit.rate >= 0.5) \
                    .filter(Unit.cluster != 0) \

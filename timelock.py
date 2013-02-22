@@ -136,7 +136,7 @@ def _load_data(datadir, tetrodes):
     import os
     import re
     import pickle as pkl
-    import DataSession
+    import other.DataSession
     
     filelist = os.listdir(datadir)
     filelist.sort()
