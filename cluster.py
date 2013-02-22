@@ -70,7 +70,7 @@ class Viewer(object):
         self._xcache = defaultdict(dict) # Cache for xcorr data
         self._acache = defaultdict(dict) # Cache for acorr data
     
-    def scatter(self, clusters = None, components = [1,2,3]):
+    def scatter(self, clusters = None, components = [1,2,3], n_points = 500):
         ''' Make a scatter plot of the waveforms projected on the PCA components,
             colored by cluster.  
             
@@ -86,22 +86,30 @@ class Viewer(object):
         
         '''
         from itertools import combinations
+        from numpy.random import randint
+        
+        def sample(N):
+            if N > n_points:
+                return randint(0,N,n_points)
+            else:
+                return range(N)
+             
         clusters = self._sanitizeClusters(clusters)
         features = { k:self.clusters[k]['pca'] for k in clusters }
         # We say the 1st PCA component, but it is the 0th column in the data
         components = np.array(components) - 1
         
-        fig, subplots = _createSubplots(1, _binomial(len(components),2))
+        fig, subplots = _createSubplots(_binomial(len(components),2))
         # This is an iterator over all pairs of components
         itercomps = combinations(components,2)
         for ii, (comp_1, comp_2) in enumerate(itercomps):
             ax = subplots[ii]
             
-            xs = np.concatenate([feature[:, comp_1] 
+            xs = np.concatenate([feature[sample(len(feature)), comp_1]
                                  for feature in features.itervalues()])
-            ys = np.concatenate([feature[:, comp_2] 
+            ys = np.concatenate([feature[sample(len(feature)), comp_2] 
                                  for feature in features.itervalues()])
-            colors = np.concatenate([[self._colors[k]]*len(x) 
+            colors = np.concatenate([[self._colors[k]]*len(sample(len(x))) 
                                      for k, x in features.iteritems()])
             
             ax.scatter(xs, ys, marker = '.', s = 10, color = colors, edgecolor = 'face')
@@ -160,8 +168,8 @@ class Viewer(object):
         from numpy.random import randint
 
         clusters = self._sanitizeClusters(clusters)
-        fig, subplots = _createSubplots(2, len(clusters))
-        
+        fig, subplots = _createSubplots(len(clusters), sharex=True)
+       
         # The waveforms are going to be separated into slices this long
         # SLICE = 30 
         N_SAMPLES = 50
@@ -181,7 +189,7 @@ class Viewer(object):
                 plots = ax.plot(xs, waveforms.T, color = color, alpha = 0.3)
             elif len(np.shape(waveforms)) == 1:
                 plots = ax.plot(xs, waveforms.T, color = color)
-                
+        
         plot_var = [ wf_plot(ax, r_wf, c)
                      for ax, r_wf, c in zip(subplots, r_wfs, colors) ]
           
@@ -198,7 +206,7 @@ class Viewer(object):
         
         return self
         
-    def acorrs(self, clusters = None, bin_width = 0.001, limit = 0.02):
+    def acorrs(self, clusters = None, bin_width = 0.0015, limit = 0.03):
         ''' Plots cluster autocorrelations.
         
             Returns self.
@@ -222,12 +230,14 @@ class Viewer(object):
         clusters = self._sanitizeClusters(clusters, hold_out=[0])
         corrs = {k:self._getCorrs((k,k,bin_width,limit), auto=True) 
                  for k in clusters if len(self.clusters[k]['times'])>0}
-        fig, subplots = _createSubplots(3, len(corrs))
+        fig, subplots = _createSubplots(len(corrs), sharex=True)
     
         plots = [ subplots[ii].bar(bins[:-1]*1000, counts, width = bin_width*1000, 
                   color = self._colors[k], edgecolor = 'none') 
                   for ii, (k, (counts, bins)) in enumerate(corrs.iteritems())]
-    
+        
+        plots = [ ax.set_xlim((-limit*1000,limit*1000)) for ax in subplots ]
+        
         fig.tight_layout(h_pad=0.1, w_pad=0.1)
         fig.show()
         
@@ -254,7 +264,7 @@ class Viewer(object):
         
         '''
         clusters = self._sanitizeClusters(clusters, hold_out=[0])
-    
+        
         fig = plt.figure(4)
         plt.clf()
         # Set the number of rows and columns to plot
@@ -795,16 +805,18 @@ def _load_clusters(filepath):
         clusters = pkl.load(f)
     return clusters
 
-def _createSubplots(fig_num, K):
+def _createSubplots(K, sharex=False, sharey=False):
     
-    fig = plt.figure(fig_num)
-    plt.clf()
+    #plt.clf()
     n_axes = K
-    n_rows = (n_axes+2)//3
-    n_cols = 3
-    if n_axes < 3: n_cols = n_axes
+    n_rows = (n_axes+2)//4
+    n_cols = 4
+    if n_axes < 4: n_cols = n_axes
         
-    subplots = [fig.add_subplot(n_rows, n_cols, ii+1) for ii in range(n_axes)]
+    #subplots = [fig.add_subplot(n_rows, n_cols, ii+1) for ii in range(n_axes)]
+    fig, subplots = plt.subplots(n_rows, n_cols, )
+    if n_rows > 1:
+        subplots = subplots.flatten()
     
     return fig, subplots
 
