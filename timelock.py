@@ -136,28 +136,27 @@ def _load_data(datadir, tetrodes):
     import os
     import re
     import pickle as pkl
-    import other.DataSession
+    from . import DataSession
     
     filelist = os.listdir(datadir)
-    filelist.sort()
-    
-    reg = [ re.search('(\w+)_(\w+).(\w+)', filename) for filename in filelist ]
-    reg = [ r for r in reg if r != None ]
+    files = re.findall('([a-zA-Z]+\d+[a-zA-Z]*)_(\d+).([a-z]+)', ' '.join(filelist))
     
     ext = ['bhv', 'cls', 'syn', 'ons']
     data = dict.fromkeys(ext)
     data['cls'] = {}
     
     # Load the data files into data dictionary
-    for r in reg:
-        if r.group(3) in ['bhv', 'syn', 'ons']:
-            file = os.path.join(datadir, r.group(0))
-            with open(file,'r') as f:
-                data[r.group(3)] = pkl.load(f)
-        elif r.group(3) == 'cls':
+    for file in files:
+        if file[2] in ['bhv', 'syn', 'ons']:
+            filename = '{}_{}.{}'.format(*file)
+            filepath = os.path.join(datadir, filename)
+            with open(filepath,'r') as f:
+                    data[file[2]] = pkl.load(f)
+        elif file[2] == 'cls':
             for tetrode in tetrodes:
-                file = '%s/%s.%s' % (datadir, r.group(0), tetrode)
-                with open(file,'r') as f:
+                filename = '{}_{}.{}'.format(*file)
+                filepath = '%s/%s.%s' % (datadir, filename, tetrode)
+                with open(filepath,'r') as f:
                     data['cls'].update({tetrode:pkl.load(f)})
             
     # Checking to make sure the data files were loaded
