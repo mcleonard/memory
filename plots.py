@@ -97,22 +97,19 @@ def basic_figs(unit, trialData, prange=(-10,3), smooth = False):
     
     # Plot PG left vs PG right
     pg = data.groupby(by='PG response')
-    pgrates = [rates.ix[pg.get_group(LEFT).index].mean(), 
-               rates.ix[pg.get_group(RIGHT).index].mean()]
+    pgrates = [rates.ix[values.index].mean() for group, values in pg ]
     ax2 = plt.subplot2grid((2,2), (0,1))
     base_plot(time, pgrates, ax2, labels = ['PG left', 'PG right'])
     
     # Plot FG left vs FG right
     fg = data.groupby(by='FG response')
-    fgrates = [rates.ix[fg.get_group(LEFT).index].mean(), 
-               rates.ix[fg.get_group(RIGHT).index].mean()]
+    fgrates = [rates.ix[values.index].mean() for group, values in fg ]
     ax3 = plt.subplot2grid((2,2), (1,0))
     base_plot(time, fgrates, ax3, labels = ['FG left', 'FG right'])
     
     # Plot cued vs uncued
     mem = data.groupby(by='block')
-    memrates = [rates.ix[mem.get_group(RM).index].mean(), 
-               rates.ix[mem.get_group(WM).index].mean()]
+    memrates = [rates.ix[values.index].mean() for group, values in mem ]
     ax4 = plt.subplot2grid((2,2), (1,1))
     base_plot(time, memrates, ax4, labels = ['cued', 'uncued'])
     
@@ -138,10 +135,9 @@ def confidence_sig(xerr, yerr):
             Values => indices of significant intervals
     
     '''
-    
-    
+
     # If the error bounds are both negative or both positive, then 0 is not 
-    # between the error bounds. So multiplying the bounds give a positive 
+    # between the error bounds. So multiplying the bounds gives a positive 
     # number if significant.
     
     sigs = {'x':np.where((xerr.prod(axis=0)>0)&(yerr.prod(axis=0)<0))[0],
@@ -152,15 +148,30 @@ def confidence_sig(xerr, yerr):
     return sigs
     
 def p_value_sig(p_x, p_y, sig_p = 0.05):
+    ''' Returns a dictionary indicating significant data points, significance
+        being defined as 0 falling outside the confidence interval.
+
+        Arguments
+        ---------
+        p_x : 2d array
+            p-values for the x dimension
+        p_y : 2d array
+            p-values for the y dimension
+        
+        Returns
+        -------
+        sigs : dict
+            Keys => 'x', 'y', 'both', 'neither'
+            Values => indices of significant p-values
     
-    # Test for significance
+    '''
     sigs = {'x':np.where((p_x<=sig_p)&(p_y>sig_p))[0],
             'y':np.where((p_y<=sig_p)&(p_x>sig_p))[0],
             'both':np.where((p_x<=sig_p)&(p_y<=sig_p))[0],
             'neither':np.where((p_x>sig_p)&(p_y>sig_p))[0]}
     return sigs
 
-def cross_scatter(x, y, xerr, yerr, p = None, **kwargs):
+def cross_scatter(x, y, xerr, yerr, p1 = None, p2 = None, **kwargs):
     '''  cross_scatter(x, y, xerr, yerr) -> list of bools, makes a figure
     
     Makes a scatter plot with error bars.  Colors data points based on
@@ -200,8 +211,25 @@ def cross_scatter(x, y, xerr, yerr, p = None, **kwargs):
     fig = plt.figure(figsize=(5,5))
     ax = fig.add_subplot(111)
     
-    sig_level = kwargs.get('sig_level', 0.5)
-    sigs = p_value_sig(p_x,p_y,sig_p=sig_level)
+    # sigs is a dictionary with keys 'x', 'y', 'both', 'neither'
+    # The values are the significant data points
+    if p1 == None:
+        p1, p2 = (np.ones(len(x)), np.ones(len(y)))
+        sig_p = 0.01
+    elif p2 == None:
+        sig_p = my.stats.constrain_FDR(p1)
+        sig_p = kwargs.get('sig_level', sig_p)
+        p2 = p1.copy()
+        # What I'm doing here is for any points above the unity line can only
+        # be colored like 'x' and points below the unity line can only be 
+        # colored like 'y', if they are 
+        p2[np.where((x-y)<0)] = 1
+        p1[np.where((x-y)>0)] = 1
+    else:
+        sig_p = my.stats.constrain_FDR(np.concatenate([p1,p2]))
+        sig_p = kwargs.get('sig_level', sig_p)
+    
+    sigs = p_value_sig(p1,p2,sig_p)
     
     # Then plot units that are significant for working and reference memory
     xbars = np.abs(xerr - x)
