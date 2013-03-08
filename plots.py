@@ -220,7 +220,7 @@ def cross_scatter(x, y, xerr, yerr, p1 = None, p2 = None, **kwargs):
     elif p2 == None:
         sig_p = my.stats.constrain_FDR(p1)
         sig_p = kwargs.get('sig_level', sig_p)
-        p1, p2 = p1.copy(), p2.copy()
+        p1, p2 = p1.copy(), p1.copy()
         # What I'm doing here is for any points above the unity line can only
         # be colored like 'x' and points below the unity line can only be 
         # colored like 'y', if they are 
