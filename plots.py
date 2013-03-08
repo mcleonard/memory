@@ -69,7 +69,6 @@ def raster(unit, trialData, events = ['PG in', 'FG in'],
     
 def basic_figs(unit, trialData, prange=(-10,3), smooth = False):
     from itertools import izip
-    fig = plt.figure()
     
     def base_plot(xs, rates, ax, labels = None, title = None):
         
@@ -113,6 +112,8 @@ def basic_figs(unit, trialData, prange=(-10,3), smooth = False):
     ax4 = plt.subplot2grid((2,2), (1,1))
     base_plot(time, memrates, ax4, labels = ['cued', 'uncued'])
     
+    plt.show()
+    fig = plt.gca().figure
     fig.tight_layout()
     
     return fig
@@ -219,7 +220,7 @@ def cross_scatter(x, y, xerr, yerr, p1 = None, p2 = None, **kwargs):
     elif p2 == None:
         sig_p = my.stats.constrain_FDR(p1)
         sig_p = kwargs.get('sig_level', sig_p)
-        p2 = p1.copy()
+        p1, p2 = p1.copy(), p2.copy()
         # What I'm doing here is for any points above the unity line can only
         # be colored like 'x' and points below the unity line can only be 
         # colored like 'y', if they are 
