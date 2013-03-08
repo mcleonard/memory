@@ -31,10 +31,23 @@ def memoize(func):
         return cache[args]
     return wrapper
     
-def catalog_path():
+def filepath_from_dir(dir, ext):
+    ''' Returns the absolute path of a file with extension ext in the
+        directory dir '''
+    
+    import os
+    import re
+    dirpath = os.path.expanduser(dir)
+    filelist = os.listdir(dirpath)
+    found = re.findall( '\S+.{}\S*'.format(ext), ' '.join(filelist))
+    filepath = [ os.path.join(dirpath, file) for file in found ]
+    return filepath
+
+def catalog_path(absolute = None):
     ''' This function returns the relative path to the default catalog. '''
     from os.path import expanduser, relpath
-    absolute = expanduser('~/Dropbox/Data/catalog.sqlite')
+    if absolute == None:
+        absolute = expanduser('~/Dropbox/Data/catalog.sqlite')
     return '/'+relpath(absolute)
 
 def startup():
