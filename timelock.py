@@ -11,7 +11,7 @@ class Timelock(object):
     -------
     self.lock(event) :  Aligns the timestamps for each trial such that
         t = 0 s is the time of the event in the trial
-    self.get(unit): Returns the DataFrame for unit
+    self.get(unit): Returns the timelocked data for unit
     '''
     
     def __init__(self, unit_list):
@@ -41,9 +41,7 @@ class Timelock(object):
             
             # Get all the processed behavior data from a Rat object
             bdata = data['bhv']
-            rat = bhv.Rat(session.rat)
-            rat.update(session.date, bdata)
-            trial_data = rat.sessions['trials'][0]
+            trial_data = bhv.build_data(bdata)
             
             # Keep only the behavior trials we have neural data for
             sync = data['syn'].map_n_to_b_masked
@@ -121,8 +119,8 @@ class Timelock(object):
     
     def get(self, unit):
         ''' Returns data for the given unit. '''
-        
-        return self._locked[unit.session]
+        # Return everything except the first trial because
+        return self._locked[unit.session][1:]
     
     def __repr__(self):
         
