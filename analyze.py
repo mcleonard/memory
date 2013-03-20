@@ -1,11 +1,36 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from pandas import Series, DataFrame, Panel
-from itertools import izip
-from .bhv import RIGHT, LEFT, HIT, ERROR, RM, WM
-from matplotlib.mlab import find
+from pandas import Series, DataFrame
+import memory as my
 
-def smooth(unit, unitData, width=0.1, prange = (-5,5)):
+
+def bootstrap_difference(trialData, interval, mem_type, goal, iters = 200):
+    ''' For the given unit, unitData, interval, mem_type, and goal, returns a Bootstrapper object
+        with the bootstrapped distribution of difference in means of right trials minus left trials.
+    
+    Arguments
+    ---------
+    unit : catalog Unit
+    unitData : pandas DataFrame, get from lkr.get(unit)
+    interval : a valid interval string from analyze.slice ('Early', 'Middle', 'Late', etc.)
+    mem_type : int, either memory.WM (working memory) or memory.RM (reference memory)
+    goal : 'PG' (past goal) or 'FG' (future goal)
+    
+    Returns
+    -------
+    out : Bootstrapper with the bootstrapped difference of means, right - left.
+        You can get the mean, out.mean(), and CIs, out.prctile().
+    '''
+    from memory.stats import Bootstrapper
+    data = trialData
+    hits = data.groupby(by=['block','PG outcome','FG outcome']).get_group((mem_type,my.HIT, my.HIT))
+    sides = hits.groupby(by=goal+' response')
+    rates = np.array( [my.slice(group)[interval].values for _, group in sides] )
+    # I like to define it as right - left, so the value is to the left of zero if left rate is greater
+    diff = Bootstrapper(rates[1], s2 = rates[0], stat_func = lambda x,y:np.mean(x)-np.mean(y), iters = iters)
+    return diff
+
+def smooth(trialData, width=0.1, prange = (-5,5)):
     ''' Smoothes the unit spiking data by replacing every spike with a gaussian.
         Not convinced this is faster than doing a fftconvolve, but okay.
         Arguments:
@@ -16,7 +41,7 @@ def smooth(unit, unitData, width=0.1, prange = (-5,5)):
     '''
     
     # This returns arrays a binary spike train with 1 ms bins
-    trains = spike_trains(unit, unitData, prange=prange)
+    trains = spike_trains(trialData, prange=prange)
     x = trains.columns.values.astype(float)
     gaussian = lambda u: 1/width/np.sqrt(2*np.pi)*np.exp(-(x-u)**2/2/width**2)
     smoothed = DataFrame(index = trains.index, columns = trains.columns)
@@ -64,10 +89,10 @@ def get_trajectories(data, mem = 'wm', outcomes = ('hit','hit')):
             ('left','right'):trajectory(pgleft,fgright),
             ('right','right'):trajectory(pgright,fgright)}
 
-def ratehist(unit, trialData, bin_width=0.200, prange = (-20,2)):
+def ratehist(trialData, bin_width=0.200, prange = (-20,2)):
     ''' Output is a DataFrame, time as the columns, index is trial numbers'''
     
-    timestamps = trialData[unit.id]
+    timestamps = trialData['timestamps']
     nbins = np.diff(prange)[0]/bin_width
     columns = np.arange(prange[0], prange[1], bin_width)+bin_width/2.
     rateFrame = DataFrame(index = trialData.index, 
@@ -78,10 +103,10 @@ def ratehist(unit, trialData, bin_width=0.200, prange = (-20,2)):
         rateFrame.ix[ind] = rate
     return rateFrame
 
-def spike_trains(unit, trialData, prange = (-20,2)):
+def spike_trains(trialData, prange = (-20,2)):
     ''' Returns a binary spike train.  '''
     
-    train = ratehist(unit, trialData, bin_width = 0.001, prange = prange)
+    train = ratehist(trialData, bin_width = 0.001, prange = prange)
     train = train/1000.0
     return train
 
@@ -124,13 +149,13 @@ def raster(unit, trialData, sort_by= 'PG in', range = None):
     plt.ylim(0,len(data))
     plt.show()
 
-def basic_figs(unit, trialData, range=(-10,3)):
-    
+def basic_figs(trialData, range=(-10,3)):
+    from itertools import izip
     print "DEPRECATED: use mycode.plots"
     
     data = trialData
     uid = unit.id
-    times = ratehist(unit, data, range= range)
+    times = ratehist(data, range= range)
     
     def base_plot(xs, rates, label):
         
@@ -165,12 +190,12 @@ def basic_figs(unit, trialData, range=(-10,3)):
     rates = [cued.mean(), uncued.mean()]
     base_plot(times.columns.values, rates, label = ['cued', 'uncued'])
 
-def trajectory(unit, trialData, range= (-10,3)):
+def trajectory(trialData, range= (-10,3)):
     
     data = trialData
     
     # Define the plot
-    def base_plot(unit, data, range):
+    def base_plot(data, range):
         
         ylims=[0]*4
         titles = ['right->left', 'left->left', 'left->right', 'right->right']
@@ -205,17 +230,17 @@ def trajectory(unit, trialData, range= (-10,3)):
         plt.figure()
         for ii, num in enumerate(subplots):
             plt.subplot(num)
-            raster(unit, traj_data[ii], range = range)
+            raster(traj_data[ii], range = range)
             plt.title(titles[ii])
             
     cued = data[data['hits'] & (data['block']==RM)]
     uncued = data[data['hits'] & (data['block']==WM)]
     
     # Pass the data to the plot
-    base_plot(unit, cued, range)
-    base_plot(unit, uncued, range)
+    base_plot(cued, range)
+    base_plot(uncued, range)
 
-def interval(unit, trialData, low, high):
+def interval(trialData, low, high):
     
     lows = ['PG in','PG out','C in','C out','L reward','R reward','onset']
     highs = ['PG out','C in','C out','L reward','R reward','onset','FG in']
@@ -230,8 +255,7 @@ def interval(unit, trialData, low, high):
     else:
         raise ValueError, '%s not a valid option for high' % high
     
-    data = trialData
-    times = data[[unit.id, low, high]].T
+    times = trialData[['timestamps', low, high]].T
     for ii, series in times.iteritems():
         spiketimes = series.ix[0]
         lowtime = series.ix[1]
@@ -241,7 +265,7 @@ def interval(unit, trialData, low, high):
     
     return times.T
     
-def slice(unit, trialData, sort_by = None, show = False, times=False):
+def slice(trialData, sort_by = None, show = False, times=False):
     ''' Slices the data into six intervals, in the PG port, early delay,
         middle delay, late delay, in the center port, between the center
         port and FG port.  The average rate in each of these intervals is
@@ -275,10 +299,10 @@ def slice(unit, trialData, sort_by = None, show = False, times=False):
         cent = (row['C in'], row['C out'])
         delay = (row['PG out'], row['C in'])
     
-        counts = [ np.histogram(row[unit.id], bins = 1, range=pg)[0] ]
+        counts = [ np.histogram(row['timestamps'], bins = 1, range=pg)[0] ]
         
-        counts.append(np.histogram(row[unit.id], bins=3, range=delay)[0])
-        counts.extend([np.histogram(row[unit.id], bins = 1, range=period)[0] 
+        counts.append(np.histogram(row['timestamps'], bins=3, range=delay)[0])
+        counts.extend([np.histogram(row['timestamps'], bins = 1, range=period)[0] 
                         for period in [cent, fg]])
         
         counts = np.concatenate(counts)
@@ -306,6 +330,7 @@ def confidence_sig(xerr, yerr):
     print "DEPRECATED: use mycode.plots.cross_scatter"
     
     from itertools import repeat
+    from matplotlib.mlab import find
     def is_sig(test, between):
         is_it = (between[0] <= test) & (between[1] >= test)
         return not is_it

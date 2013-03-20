@@ -5,7 +5,162 @@ import matplotlib.pyplot as plt
 import memory as my
 from .constants import LEFT, RIGHT, WM, RM, HIT, ERROR
 
-def raster(unit, trialData, events = ['PG in', 'FG in'], 
+def differences(units, lkr, intervals, goal, iters = 2000):
+    """ Creates a plot showing the firing rate difference between right and left trials.  Also
+        plots histograms for the rate differences.
+        
+        Arguments
+        ---------
+        units : list of catalog units
+        lkr : Timelocker
+        intervals : list of str, intervals you want plotted, ex. ['Early','Middle','Late']
+        goal : 'PG' or 'FG' (past goal or future goal)
+        iters : iterations to run for bootstrapping and permutation tests
+    """
+    from memory.analyze import bootstrap_difference
+    from memory.stats import permutation_test, null_difference, constrain_FDR
+    
+    # This determines the size of the subplot grid
+    GRID = (len(intervals),3)
+    
+    for ii, interval in enumerate(intervals):
+        ps=np.ones(len(units))
+        diffs = [ bootstrap_difference(lkr.get(unit), interval, my.WM, 
+                                       goal, iters = iters) 
+                                       for unit in units ]
+        for jj, diff in enumerate(diffs):
+            _, ps[jj] = permutation_test(diff.mean(), [diff.sample, diff.sample2], null_difference)
+        
+        means = np.array([diff.mean() for diff in diffs])
+        CIs = np.abs(np.array([diff.prctile() for diff in diffs]).T-means)
+        p_level = constrain_FDR(ps)
+        sigs = np.where(ps<=p_level)[0]
+        notsigs = np.where(ps>p_level)[0]
+        
+        # This part is for making the rate differences plot
+        ax = plt.subplot2grid(GRID, (0,ii), rowspan = 2)
+        ax.errorbar(np.zeros(len(sigs))+means[sigs],sigs,xerr=CIs[:,sigs], fmt='o', color='k')
+        ax.errorbar(np.zeros(len(notsigs))+means[notsigs],notsigs,xerr=CIs[:,notsigs], fmt='o', color='grey')
+        ax.set_ylim(-1,len(units))
+        yl = ax.get_ylim()
+        xl = ax.get_xlim()
+        ax.plot([0,0],yl,'--', color = 'grey')
+        ax.set_yticks(range(0,len(units)))
+        ax.set_yticklabels([str(unit.id) for unit in units])
+        ax.set_title(interval)
+        
+        # And this part is for the histograms
+        ax = plt.subplot2grid(GRID, (2,ii))
+        BIN_W = 0.2 # Bin width
+        BINS = int((xl[1]-xl[0])/BIN_W)
+        ax.hist(means[notsigs], bins=BINS, range=xl, facecolor = 'w', edgecolor = 'k')
+        ax.hist(means[sigs], bins=BINS, range=xl, color = 'k')
+
+def add_sig_colors(x, y, ax, p):
+    """ Adds a legend showing significance between bars
+        
+        Arguments
+        ---------
+        x, y: ints, location of the upper left corner of the legend
+        ax : axis the legend belongs to
+        p : p-value to show on the legend
+    """
+    
+    # Setting the height and width as a ratio so they are the same size
+    # regardless of the plot scale
+    rect_h = np.diff(ax.get_ylim())[0]/20.0
+    rect_w = np.diff(ax.get_xlim())[0]/10.0
+    
+    # The blue bar
+    rect = plt.Rectangle((x,y),rect_w,rect_h,color='steelblue')
+    ax.add_artist(rect)
+    rect.set_clip_box(ax.bbox)
+    
+    # The orange bar
+    rect = plt.Rectangle((x+0.5,y),rect_w,rect_h,color='orangered')
+    ax.add_artist(rect)
+    rect.set_clip_box(ax.bbox)
+    
+    # This part indicates the p-value
+    line = plt.Line2D([x+1.2*rect_w,x+2.3*rect_w], [y+0.5*rect_h,y+0.5*rect_h], color = 'k', lw = 2)
+    ax.add_artist(line)
+    line.set_clip_box(ax.bbox)
+    ptext = plt.Text(x=x+0.25*rect_w, y = y+1.5*rect_h, text='p = {:01.3f}'.format(p), size='large')
+    ax.add_artist(ptext)
+    #aster.set_clip_box(ax.bbox)
+
+def trajectories(trialData, interval, mem, legend_loc=(0.5,2.0)):
+    """ Plots bars showing mean rates for the four trajectories.  Colors the
+        bars to show signficance.  Significance is found from a linear model
+        and ANOVA, which are also plotted
+        
+        Arguments
+        ---------
+        unit : catalog unit
+        unitData : pandas DataFrame, get from lkr.get(unit) for instance
+        interval : interval you want to analyze ('Early', 'Middle', or 'Late' for instance)
+        mem : my.WM or my.RM for working memory or reference memory, respectively
+    """
+    from memory.stats import Bootstrapper
+    from pandas import DataFrame
+    import statsmodels.api as sm
+    from statsmodels.formula.api import ols
+    from statsmodels.stats.anova import anova_lm
+    
+    # This is all data calculations
+    data = trialData.groupby(by=['block', 'PG outcome', 'FG outcome']).get_group((mem, my.HIT, my.HIT))
+    rates = my.slice(data)
+    df = DataFrame([data['PG response'], data['FG response'], rates[interval]]).T
+    df.columns = ['PG','FG','rate']
+    sides = df.groupby(by=['PG','FG'])
+    
+    # Now we're going to bootstrap our rates, for each PG-FG trajectory
+    booted = { group:Bootstrapper(values['rate'].values, np.mean, iters = 2000)
+               for group, values in sides  }
+    means = [ booted[side].mean() for side,_ in sides ]
+    CIs = [ booted[side].prctile() for side,_ in sides ]
+    trajectories = [ side for side,_ in sides ]
+    
+    # And fit a linear model, run ANOVA to test for significant parameters
+    ls = ols('rate ~ PG + FG', df).fit()
+    anova = anova_lm(ls, type=3)
+    lin_fit = [ ls.params['PG']*pg + ls.params['FG']*fg + ls.params['Intercept']
+                for (pg, fg), val in sides ]
+
+    sig_p = 0.05
+    if anova['PR(>F)']['PG'] < sig_p:
+        bar_colors = ['steelblue', 'steelblue', 'orangered', 'orangered']
+        p = anova['PR(>F)']['PG']
+    elif anova['PR(>F)']['FG'] < sig_p:
+        bar_colors = ['steelblue', 'orangered', 'steelblue', 'orangered']
+        p = anova['PR(>F)']['FG']
+    else:
+        bar_colors = 'steelblue'
+        p = min(anova['PR(>F)']['PG'], anova['PR(>F)']['FG'])
+    
+    # Now we'll do the actual plotting
+    fig = plt.figure(figsize=(4,5))
+    ax = fig.add_subplot(111)
+    xs = np.arange(0,2,0.5)
+    y = np.array(means)
+    ybars = abs(np.array(CIs).T - y)
+    plt.bar(xs-0.20, y, width = 0.4, color = bar_colors, edgecolor='none')
+    plt.errorbar(xs, y, yerr=ybars, fmt='o', color = 'k', lw=2, ms = 5)
+    plt.plot(xs, lin_fit, '--k')
+    traj_map = {(my.LEFT,my.LEFT):'left, left', (my.LEFT,my.RIGHT):'left, right',
+                (my.RIGHT,my.RIGHT):'right, right', (my.RIGHT,my.LEFT):'right, left'}
+    plt.ylabel('Activity (spikes/s)', size='large')
+    plt.yticks(size='large')
+    #plt.title('Unit 20, Uncued trials (RM)', size='large')
+    xtlabels = [ traj_map[traj] for traj in trajectories ]
+    plt.xticks(xs, xtlabels, rotation=45, ha='right', size='large')
+    plt.xlim(-0.25,1.75)
+    yl = plt.ylim()
+    add_sig_colors(legend_loc[0], legend_loc[1], ax, p)
+    fig.tight_layout()
+    return ax
+
+def raster(trialData, events = ['PG in', 'FG in'], 
            axis = None, sort_by= 'PG in', prange = None):
     """ A function that creates a raster plot from the units' trial data 
     
@@ -38,7 +193,7 @@ def raster(unit, trialData, events = ['PG in', 'FG in'],
     
     # Preparing the data
     srtdata = trialData.sort(sort_by, ascending = False)
-    spike_times = srtdata[unit.id]
+    spike_times = srtdata['timestamps']
     cat = np.concatenate # Just for brevity
     spikes = cat([ times for times in spike_times ])
     ys = cat([np.ones(len(stamps))*ii for ii, stamps in enumerate(spike_times)])
@@ -67,7 +222,7 @@ def raster(unit, trialData, events = ['PG in', 'FG in'],
     
     return ax
     
-def basic_figs(unit, trialData, prange=(-10,3), smooth = False):
+def basic_figs(trialData, prange=(-10,3), smooth = False):
     from itertools import izip
     
     def base_plot(xs, rates, ax, labels = None, title = None):
@@ -86,9 +241,9 @@ def basic_figs(unit, trialData, prange=(-10,3), smooth = False):
     
     data = trialData
     if not smooth:
-        rates = my.analyze.ratehist(unit, data, prange = prange)
+        rates = my.analyze.ratehist(data, prange = prange)
     else:
-        rates = my.analyze.smooth(unit, data, prange = prange)
+        rates = my.analyze.smooth(data, prange = prange)
     time = rates.columns.values 
     # First plot all data
     ax1 = plt.subplot2grid((2,2), (0,0))

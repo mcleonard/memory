@@ -9,7 +9,7 @@ def permutation_test(estimate, values, null_func, iters = 2000):
         distribution for the estimated statistic.
     '''
     
-    null = np.array([ null_func(values) for ii in xrange(iters) ])
+    null = null_func(values, iters)
     
     if estimate>=0:
         p = np.sum(null>estimate)/float(len(null))
@@ -18,9 +18,9 @@ def permutation_test(estimate, values, null_func, iters = 2000):
     
     return null, p
 
-def null_difference(values):
+def null_difference(values, iters):
     ''' Calculates one value from the null distribution of the difference
-        of means of two samples.  Iterate over this to build a null 
+        of means of two samples.  Call this a bunch of times to build a null 
         distribution.
         
         Arguments
@@ -32,9 +32,9 @@ def null_difference(values):
 
     from functools import partial
     f = partial(null_two_samples, lambda x,y: np.mean(x) - np.mean(y))
-    return f(values)
+    return f(values, iters)
 
-def null_two_samples(func, values):
+def null_two_samples(func, values, iters):
     ''' To calculate the null distribution for some function of two samples, 
         we'll permute the sample labels, then calculate the function.
         
@@ -52,11 +52,11 @@ def null_two_samples(func, values):
     from numpy.random import permutation
     
     all_values = np.concatenate(values)
-    permuted = permutation(all_values)
-    faux_1 = permuted[:len(values[0])]
-    faux_2 = permuted[len(values[0]):]
+    permuted = ( permutation(all_values) for ii in xrange(iters) )
+    null = [ func(perm[:len(values[0])], perm[len(values[0]):]) 
+             for perm in permuted ]
     
-    return func(faux_1, faux_2)
+    return null
     
 
 def constrain_FDR(p_values, level = 0.05):
@@ -191,28 +191,58 @@ def ranksum_small(samp1, samp2):
     
     return np.min([U1, U2]), p
 
-
-
 class Bootstrapper(object):
+    ''' An object for producing bootstrapped estimates.
+        
+        Arguments
+        ---------
+        s1 :  array-like
+            Input sampled data
+        s2 :  array-like
+            Second input sampled data, if comparing two samples
+        stat_func : function
+            Function for the estimate you want to make.  Must accept s1 and s2
+            as valid arguments
+        iters : int
+            Number of boostrapped estimates you want
+            
+        So, if you want to get a bootstrapped estimate of the mean:
+            bar = Bootstrapper(s1, np.mean, iters = 2000)
+        If you want to get the bootstrapped estimate for the difference in
+        means of two distributions:
+            
+            bar = Bootstrapper(s1, s2 = s2, lambda x,y: np.mean(x) - np.mean(y), iters = 2000)
+            
+            or
+            
+            def est_func(x,y): 
+                np.mean(x) - np.mean(y)
+            bar = Bootstrapper(s1, s2 = s2, est_func, iters = 2000)
     
-    def __init__(self, data, stat_func, iters = 200):
-        self.data = data
+    '''
+
+    def __init__(self, s1, stat_func = np.mean, s2 = None, iters = 200):
+        self.sample = s1
+        self.sample2 = s2
         self.func = stat_func
         self.iters = iters
-        self.booted = bootstrap(data, stat_func, iters)
-        self.booted.sort()
+        if s2 == None:
+            self.dist = bootstrap(s1, stat_func, iters)
+        else:
+            self.dist = bootstrap_2samp(s1, s2, stat_func, iters)
+        self.dist.sort()
     
     def mean(self):
         ''' Returns the mean of the bootstrapped statistic '''
-        return np.mean(self.booted)
+        return np.mean(self.dist)
         
     def median(self):
         ''' Returns the median of the bootstrapped statistic '''
-        return np.median(self.booted)
+        return np.median(self.dist)
     
     def std(self):
         ''' Returns the standard deviation of the bootstrapped statistic '''
-        return np.std(self.booted)
+        return np.std(self.dist)
     
     def bcaconf(self, p = (2.5, 97.5)):
         ''' This function calculates the bias-corrected and accelerated (BCA)
@@ -232,13 +262,13 @@ class Bootstrapper(object):
         
         z = norm.ppf # Doing this for brevity
         
-        theta = self.func(self.data)
-        z_0 = norm.ppf(np.sum(self.booted < theta)/ float(self.iters))
+        theta = self.func(self.sample)
+        z_0 = z(np.sum(self.dist < theta)/ float(self.iters))
         
-        N = len(self.data)
-        theta_dot = np.sum(jackknife(self.data, self.func)/N)
-        samples = combinations(range(0,N), N-1) 
-        diff = np.array([ theta_dot - self.func(self.data[np.array(samp)])
+        N = len(self.sample)
+        theta_dot = np.sum(jackknife(self.sample, self.func)/N)
+        samples = combinations(range(0,N), N-1)
+        diff = np.array([ theta_dot - self.func(self.sample[np.array(samp)])
                           for samp in samples ])
         a_hat = np.sum(diff**3)/(6*np.sum(diff**2)**1.5)
         
@@ -246,8 +276,12 @@ class Bootstrapper(object):
         alpha_func = lambda a: norm.cdf(z_0+(z_0+z(a/100.))/(1-a_hat*(z_0+z(a/100.))))
         alphas = np.array([alpha_func(perc) for perc in p])
         # So then, conf are the actual confidence interval bounds
-        conf = self.booted[(self.iters*alphas).astype(int)]
-        
+        try:
+            conf = self.dist[(self.iters*alphas).astype(int)]
+        except IndexError:
+            print "Index error, alphas = {}".format(alphas)
+            print "Using prctile instead"
+            conf = self.prctile(p=p)
         return conf
     
     def prctile(self, p = (2.5, 97.5)):
@@ -260,25 +294,25 @@ class Bootstrapper(object):
         '''
         
         from matplotlib.mlab import prctile
-        return prctile(self.booted, p = p)
+        return prctile(self.dist, p = p)
         
     def __repr__(self):
         return "<Bootstrapper(B={})>".format(self.iters)
 
-def bootstrap(data, stat_func, iters = 200, verbose=False):
+def bootstrap(s1, stat_func, iters = 200, verbose=False):
     ''' Compute the distribution of a statistic (mean, variance, etc.)
         using the bootstrapping method, sampling with replacement.
         
         Parameters
         ----------
         
-        data : array like
+        s1 : array like
             The input sampled data.
-        measure_func : function
+        stat_func : function
             The function for the statistic that will be calculated from
             bootstrap samples.  For instance, if you want to calculate the
             distribution of the means of the sample, use np.mean for
-            measure_func.
+            stat_func.
         iters : int
             The number of bootstrapping samples you want to get from your
             data.  Higher is better, default is 100.
@@ -290,7 +324,39 @@ def bootstrap(data, stat_func, iters = 200, verbose=False):
         
     '''
     if verbose: print "Bootstrapping with {} iterations".format(iters)
-    out = map(stat_func, BootSample(data, iters))
+    out = map(stat_func, BootSample(s1, iters))
+    
+    return np.array(out)
+    
+def bootstrap_2samp(s1, s2, stat_func, iters=200, verbose=False):
+    ''' Compute the distribution of a statistic (mean, variance, etc.)
+        using the bootstrapping method, sampling with replacement.
+        
+        Parameters
+        ----------
+        
+        s1 : array like
+            The first sampled data.
+        s2 : array-like
+            The second sampled data.
+        stat_func : function
+            The function for the statistic that will be calculated from
+            bootstrap samples.  For instance, if you want to calculate the
+            distribution of the means of the sample, use np.mean for
+            stat_func.
+        iters : int
+            The number of bootstrapping samples you want to get from your
+            data.  Higher is better, default is 200, I generally do 2000.
+            
+        Returns
+        -------
+        out : np.array
+            The output of measure_func for each of the bootstrap samples.
+        
+    '''
+    from itertools import izip
+    if verbose: print "Bootstrapping with {} iterations".format(iters)
+    out = [stat_func(x,y) for x,y in izip(BootSample(s1, iters), BootSample(s2, iters))]
     
     return np.array(out)
     
@@ -311,9 +377,11 @@ class BootSample(object):
             is max integers long, the integers are between min and max.
     
     '''
-    from numpy.random import randint
+    
     
     def __init__(self, data, iters):
+        from numpy.random import randint
+        self.randint = randint
         self._data = data
         if ~hasattr(self._data, 'ix'): # Checking if data is a pandas DataFrame
             self.next = self._numpy_next 
@@ -329,7 +397,7 @@ class BootSample(object):
     def _numpy_next(self):
         for ii in np.arange(self._iters):
             # Get N random integers, N is the number of data points
-            sample = randint(0,len(self._data),len(self._data))
+            sample = self.randint(0,len(self._data),len(self._data))
             samp = self._data[sample]
             yield samp
     

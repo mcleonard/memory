@@ -119,8 +119,11 @@ class Timelock(object):
     
     def get(self, unit):
         ''' Returns data for the given unit. '''
-        # Return everything except the first trial because
-        return self._locked[unit.session][1:]
+        # Return everything except the first trial because it's junk
+        data = self._locked[unit.session][1:]
+        data['timestamps'] = data[unit.id]
+        spikecols = data.columns[[type(col)==type(1) for col in data.columns ]]
+        return data.drop(spikecols, axis=1)
     
     def __repr__(self):
         
