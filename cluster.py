@@ -171,13 +171,13 @@ class Viewer(object):
         fig, subplots = _createSubplots(len(clusters), sharex=True)
        
         # The waveforms are going to be separated into slices this long
-        # SLICE = 30 
+        SLICE = 30
         N_SAMPLES = 50
+        GAP = 10
         # Build the x values to use in the plots
-        xs = np.arange(0, 120)
-        #xs = np.concatenate([np.arange(SLICE)+ii*(SLICE+10) for ii in range(4)])
+        xs = np.concatenate([np.arange(SLICE)+ii*(SLICE+GAP) for ii in range(4)])
         # And build the slices we'll take from the waveforms
-        # slices = [(SLICE*ii, SLICE*(ii+1)) for ii in range(4)]
+        slices = [(SLICE*ii, SLICE*(ii+1)) for ii in range(4)]
         
         waveforms = [ self.clusters[k]['waveforms'] for k in clusters ]
         means = [ np.mean(wf, axis=0) for wf in waveforms ]
@@ -185,10 +185,16 @@ class Viewer(object):
         colors = [ self._colors[k] for k in clusters ]
         
         def wf_plot(ax, waveforms, color):
-            if len(np.shape(waveforms)) == 2:
-                plots = ax.plot(xs, waveforms.T, color = color, alpha = 0.3)
-            elif len(np.shape(waveforms)) == 1:
-                plots = ax.plot(xs, waveforms.T, color = color)
+            #1/0
+            for low, high in slices:
+                if len(np.shape(waveforms)) == 2:
+                    plots = ax.plot(xs[low:high], 
+                                    waveforms.T[low:high, :], 
+                                    color = color, alpha = 0.3)
+                elif len(np.shape(waveforms)) == 1:
+                    plots = ax.plot(xs[low:high], 
+                                    waveforms.T[low:high], 
+                                    color = color)
         
         plot_var = [ wf_plot(ax, r_wf, c)
                      for ax, r_wf, c in zip(subplots, r_wfs, colors) ]
@@ -228,14 +234,14 @@ class Viewer(object):
         '''
         
         clusters = self._sanitizeClusters(clusters, hold_out=[0])
-        corrs = {k:self._getCorrs((k,k,bin_width,limit), auto=True) 
+        corrs = { k:self._getCorrs((k,k,bin_width,limit), auto=True) 
                  for k in clusters if len(self.clusters[k]['times'])>0}
         fig, subplots = _createSubplots(len(corrs), sharex=True)
-    
-        plots = [ subplots[ii].bar(bins[:-1]*1000, counts, width = bin_width*1000, 
-                  color = self._colors[k], edgecolor = 'none') 
-                  for ii, (k, (counts, bins)) in enumerate(corrs.iteritems())]
         
+        for ii, (k, (counts, bins)) in enumerate(corrs.iteritems()):
+            subplots[ii].bar(bins[:-1]*1000, counts, width = bin_width*1000, 
+                             color = self._colors[k], edgecolor = 'none') 
+            
         plots = [ ax.set_xlim((-limit*1000,limit*1000)) for ax in subplots ]
         
         fig.tight_layout(h_pad=0.1, w_pad=0.1)
@@ -425,8 +431,9 @@ class Sorter(Viewer):
         self._xcache = defaultdict(dict)
         self._acache = defaultdict(dict)
         self._dirty = set()
+        self.clusters = dict.fromkeys(range(1, self.K+1))
     
-    def sort(self, data, fit_once = False):
+    def sort(self, data, fit_once = True):
         ''' Sorts spike data into clusters
         
         Arguments
@@ -460,7 +467,7 @@ class Sorter(Viewer):
         else:
             print 'Model with %d components converged' % self.K
             self.bic = self.gmm.bic(x)
-            self.clusters = dict.fromkeys(range(1, self.K+1))
+            
             probs = self.gmm.predict_proba(x)
             index, cluster_id = np.where(probs>=prob_cutoff)
             for k in self.clusters.iterkeys():
@@ -571,9 +578,6 @@ class Sorter(Viewer):
         new_pca = _pca(waveforms, self.dimensions).transform(waveforms)
         x = new_pca - np.mean(new_pca, axis=0)
         gmm.fit(x)
-        self.gmm.init_params = ''
-        while not self.gmm.converged_:
-            self.gmm.fit(x)
         new_sorting = gmm.predict(x)
         new_ids = [ ii for ii in range(0,len(self)+K)
                         if ii not in self.clusters ]
@@ -610,7 +614,7 @@ class Sorter(Viewer):
         Outlier removal is done following the method in Hill D.N., et al., 2011
         
         '''     
-        inv = np.matrix.inv
+        inv = np.linalg.inv
         for k, cluster in self.clusters.iteritems():
             
             if k != 0: # Cluster 0 is the noise cluster
@@ -807,14 +811,12 @@ def _load_clusters(filepath):
 
 def _createSubplots(K, sharex=False, sharey=False):
     
-    #plt.clf()
     n_axes = K
-    n_rows = (n_axes+2)//4
+    n_rows = (n_axes+3)//4
     n_cols = 4
     if n_axes < 4: n_cols = n_axes
-        
-    #subplots = [fig.add_subplot(n_rows, n_cols, ii+1) for ii in range(n_axes)]
-    fig, subplots = plt.subplots(n_rows, n_cols, )
+    
+    fig, subplots = plt.subplots(n_rows, n_cols, sharex, sharey)
     if n_rows > 1:
         subplots = subplots.flatten()
     

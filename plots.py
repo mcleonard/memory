@@ -1,11 +1,31 @@
 ''' Module containing functions to generate figures '''
 
+from functools import wraps
+
 import numpy as np
 import matplotlib.pyplot as plt
-import memory as my
-from .constants import LEFT, RIGHT, WM, RM, HIT, ERROR
+import pandas as pd
 
-def differences(units, lkr, intervals, goal, iters = 2000):
+import analyze
+from constants import *
+
+def passed_or_new_ax(func):
+    """ This is a decorator for the plots in this module.  Most plots can be
+        passed an existing axis to plot on.  If it isn't passed an axis, then
+        a new figure and new axis should be generated and passed to the plot.
+        This decorator ensures this happens.
+    """
+    @wraps(func)
+    def inner(*args, **kwargs):
+        if 'ax' in kwargs:
+            return func(*args, **kwargs)
+        else:
+            fig, ax = plt.subplots(figsize=kwargs.get('figsize', None))
+            kwargs.update({'ax':ax})
+        return func(*args, **kwargs)
+    return inner
+
+def differences(units, lkr, intervals, goal, mem=WM, iters=2000):
     """ Creates a plot showing the firing rate difference between right and left trials.  Also
         plots histograms for the rate differences.
         
@@ -21,41 +41,76 @@ def differences(units, lkr, intervals, goal, iters = 2000):
     from memory.stats import permutation_test, null_difference, constrain_FDR
     
     # This determines the size of the subplot grid
-    GRID = (len(intervals),3)
+    ROWS = 4
+    COLUMNS = len(intervals)
+    GRID = (ROWS,COLUMNS)
+    
+    dtypes = [('pref','i8'), ('mean','f8'), ('CI','f8',2),('p','f8')]
     
     for ii, interval in enumerate(intervals):
-        ps=np.ones(len(units))
-        diffs = [ bootstrap_difference(lkr.get(unit), interval, my.WM, 
-                                       goal, iters = iters) 
-                                       for unit in units ]
-        for jj, diff in enumerate(diffs):
-            _, ps[jj] = permutation_test(diff.mean(), [diff.sample, diff.sample2], null_difference)
-        
-        means = np.array([diff.mean() for diff in diffs])
-        CIs = np.abs(np.array([diff.prctile() for diff in diffs]).T-means)
-        p_level = constrain_FDR(ps)
-        sigs = np.where(ps<=p_level)[0]
-        notsigs = np.where(ps>p_level)[0]
-        
+        dataFrames = ( lkr.get(unit) for unit in units )
+        calc = np.zeros(len(units), dtype = dtypes)
+        for jj, data in enumerate(dataFrames):
+            calc[jj] = ( data.outcomes(HIT, HIT)
+                             .blocks(mem)
+                             .preferred_side(goal, interval, iters) )
+
         # This part is for making the rate differences plot
-        ax = plt.subplot2grid(GRID, (0,ii), rowspan = 2)
-        ax.errorbar(np.zeros(len(sigs))+means[sigs],sigs,xerr=CIs[:,sigs], fmt='o', color='k')
-        ax.errorbar(np.zeros(len(notsigs))+means[notsigs],notsigs,xerr=CIs[:,notsigs], fmt='o', color='grey')
-        ax.set_ylim(-1,len(units))
-        yl = ax.get_ylim()
-        xl = ax.get_xlim()
-        ax.plot([0,0],yl,'--', color = 'grey')
+        ax = plt.subplot2grid(GRID, (0,ii), rowspan = ROWS-1)
+        ax, sigs = difference_plot(ax, calc['mean'], calc['CI'].T, calc['p'])
+        
         ax.set_yticks(range(0,len(units)))
-        ax.set_yticklabels([str(unit.id) for unit in units])
+        ax.set_xticklabels('')
         ax.set_title(interval)
+        ax.set_yticklabels([str(unit.id) for unit in units])
+        # Get the xlims of this plot to use in the histogram plot
+        xl = ax.get_xlim()
         
         # And this part is for the histograms
-        ax = plt.subplot2grid(GRID, (2,ii))
-        BIN_W = 0.2 # Bin width
-        BINS = int((xl[1]-xl[0])/BIN_W)
-        ax.hist(means[notsigs], bins=BINS, range=xl, facecolor = 'w', edgecolor = 'k')
-        ax.hist(means[sigs], bins=BINS, range=xl, color = 'k')
+        ax = plt.subplot2grid(GRID, (ROWS-1,ii))
+        ax, _ = sig_histogram(ax, calc['mean'], calc['p'], xlims = xl)
+        
+        ax.figure.suptitle(goal, size = 'x-large')
+    
+    return ax, sigs
 
+def difference_plot(ax, values, errs, ps):
+    
+    sigs, notsigs = sig_ps(ps)
+    bars = abs(errs-values)
+    ax.errorbar(np.zeros(len(sigs))+values[sigs], sigs,
+                xerr=bars[:,sigs], fmt='o', color='k')
+    ax.errorbar(np.zeros(len(notsigs))+values[notsigs], 
+                notsigs, xerr=bars[:,notsigs], fmt='o', color='grey')
+    ax.set_ylim(-1,len(values))
+    yl = ax.get_ylim()
+    xl = ax.get_xlim()
+    ax.plot([0,0],yl,'--', color = 'grey')
+    
+    return ax, sigs
+
+def sig_histogram(ax, values, ps, xlims = None, bin_width = 0.2):
+    
+    sigs, notsigs = sig_ps(ps)
+    
+    if xlims == None:
+        xl = (values.min()-1, values.max()-1)
+    else:
+        xl = xlims
+    bins = int((xl[1]-xl[0])/bin_width)
+    ax.hist(values[notsigs], bins=bins, range=xl, facecolor = 'w', edgecolor = 'k')
+    ax.hist(values[sigs], bins=bins, range=xl, color = 'k')
+    
+    return ax, sigs
+
+def sig_ps(ps):
+    
+    p_level = my.stats.constrain_FDR(ps)
+    sigs = np.where(ps<=p_level)[0]
+    notsigs = np.where(ps>p_level)[0]
+    
+    return sigs, notsigs
+    
 def add_sig_colors(x, y, ax, p):
     """ Adds a legend showing significance between bars
         
@@ -135,7 +190,10 @@ def trajectories(trialData, interval, mem, legend_loc=(0.5,2.0)):
         bar_colors = ['steelblue', 'orangered', 'steelblue', 'orangered']
         p = anova['PR(>F)']['FG']
     else:
-        bar_colors = 'steelblue'
+        if anova['PR(>F)']['PG'] < anova['PR(>F)']['FG']:
+            bar_colors = ['steelblue', 'steelblue', 'orangered', 'orangered']
+        else:
+            bar_colors = ['steelblue', 'orangered', 'steelblue', 'orangered']
         p = min(anova['PR(>F)']['PG'], anova['PR(>F)']['FG'])
     
     # Now we'll do the actual plotting
@@ -151,7 +209,6 @@ def trajectories(trialData, interval, mem, legend_loc=(0.5,2.0)):
                 (my.RIGHT,my.RIGHT):'right, right', (my.RIGHT,my.LEFT):'right, left'}
     plt.ylabel('Activity (spikes/s)', size='large')
     plt.yticks(size='large')
-    #plt.title('Unit 20, Uncued trials (RM)', size='large')
     xtlabels = [ traj_map[traj] for traj in trajectories ]
     plt.xticks(xs, xtlabels, rotation=45, ha='right', size='large')
     plt.xlim(-0.25,1.75)
@@ -160,8 +217,8 @@ def trajectories(trialData, interval, mem, legend_loc=(0.5,2.0)):
     fig.tight_layout()
     return ax
 
-def raster(trialData, events = ['PG in', 'FG in'], 
-           axis = None, sort_by= 'PG in', prange = None):
+def raster(trialData, events=['PG in', 'FG in'], 
+           ax=None, sort_by='PG in', prange = None, figsize=(8,7)):
     """ A function that creates a raster plot from the units' trial data 
     
     Arguments
@@ -203,11 +260,9 @@ def raster(trialData, events = ['PG in', 'FG in'],
                     'C in':'m', 'C out':'g'}
     
     # Plotting the data
-    if axis == None:
-        fig = plt.figure()
-        ax = fig.add_subplot(111)
-    else:
-        ax = axis
+    if ax is None:
+        fig, ax = plt.subplots(figsize=figsize)
+
     ax.scatter(spikes, ys, c = 'k', marker = '|', s = 5) 
     for event, data in events_dict.iteritems():  # Plot the event times
         ax.scatter(data, np.arange(0,len(data)), c=event_colors[event],
@@ -218,60 +273,114 @@ def raster(trialData, events = ['PG in', 'FG in'],
     else:
         ax.set_xlim(prange)
     ax.set_ylim(0,len(data))
-    plt.show()
-    
-    return ax
-    
-def basic_figs(trialData, prange=(-10,3), smooth = False):
-    from itertools import izip
-    
-    def base_plot(xs, rates, ax, labels = None, title = None):
-        
-        if labels == None:
-            labs = ['']*2
-        else:
-            labs = labels
-        for rate, lab in izip(rates, labs):
-            ax.plot(xs, rate, label = lab)
-        ax.set_xlabel('Time (s)')
-        ax.set_ylabel('Activity (s)')
-        if title != None: ax.set_title(title)
-        if labels != None: ax.legend(loc='best')
-        ax.plot([0,0], ax.get_ylim(), '-', color = 'grey')
-    
-    data = trialData
-    if not smooth:
-        rates = my.analyze.ratehist(data, prange = prange)
-    else:
-        rates = my.analyze.smooth(data, prange = prange)
-    time = rates.columns.values 
-    # First plot all data
-    ax1 = plt.subplot2grid((2,2), (0,0))
-    base_plot(time, [rates.mean()], ax1, labels = ['All trials'])
-    
-    # Plot PG left vs PG right
-    pg = data.groupby(by='PG response')
-    pgrates = [rates.ix[values.index].mean() for group, values in pg ]
-    ax2 = plt.subplot2grid((2,2), (0,1))
-    base_plot(time, pgrates, ax2, labels = ['PG left', 'PG right'])
-    
-    # Plot FG left vs FG right
-    fg = data.groupby(by='FG response')
-    fgrates = [rates.ix[values.index].mean() for group, values in fg ]
-    ax3 = plt.subplot2grid((2,2), (1,0))
-    base_plot(time, fgrates, ax3, labels = ['FG left', 'FG right'])
-    
-    # Plot cued vs uncued
-    mem = data.groupby(by='block')
-    memrates = [rates.ix[values.index].mean() for group, values in mem ]
-    ax4 = plt.subplot2grid((2,2), (1,1))
-    base_plot(time, memrates, ax4, labels = ['cued', 'uncued'])
-    
-    plt.show()
-    fig = plt.gca().figure
+    ax.set_ylabel('Trial')
+    ax.set_xlabel('Time (s)')
+    ax.grid(False)
+
     fig.tight_layout()
+    return fig, ax
     
-    return fig
+def basic_figs(trial_data, bin_width=0.2, prange=(-10,3), smooth = False, figsize=(8,7)):
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=figsize)
+    all_peths = analyze.time_histogram(trial_data, bin_width=bin_width, prange=prange)
+    if smooth:
+        all_peths = smooth(all_peths)
+    x = all_peths.columns.values
+
+    titles = ['All', 'Block', 'PG port', 'FG port']
+
+    axes[0,0].plot(x, all_peths.mean(), label='all')
+
+    blocks = trial_data.groupby(by='block')
+    axes[0,1].plot(x, all_peths.ix[blocks.get_group(WM).index].mean(), label='uncued')
+    axes[0,1].plot(x, all_peths.ix[blocks.get_group(RM).index].mean(), label='cued')
+
+    pg = trial_data.groupby(by='PG port')
+    axes[1,0].plot(x, all_peths.ix[pg.get_group(LEFT).index].mean(), label='left')
+    axes[1,0].plot(x, all_peths.ix[pg.get_group(RIGHT).index].mean(), label='right')
+
+    fg = trial_data.groupby(by='FG port')
+    axes[1,1].plot(x, all_peths.ix[fg.get_group(LEFT).index].mean(), label='left')
+    axes[1,1].plot(x, all_peths.ix[fg.get_group(RIGHT).index].mean(), label='right')
+
+    for ax, title in zip(axes.flatten(), titles):
+        ax.set_title(title)
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel('Rate (spikes/s)')
+        ax.legend(loc='best')
+        
+    fig.tight_layout()
+
+def trajectory_peths(trial_data, prange=(-2,1), bin_width=0.05, figsize=(7,6)):
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=figsize)
+    title_map = { LEFT:'left', RIGHT:'right' }
+
+    grouped = trial_data.groupby(['PG port', 'FG port'])
+    for ax, (group, values) in zip(axes.flatten(), grouped):
+        blocks = values.groupby('block')
+        peths = analyze.time_histogram(values, prange=prange, bin_width=bin_width)
+        x = peths.columns.values
+        ax.plot(x, peths.ix[blocks.get_group(WM).index].mean(), label='uncued')
+        ax.plot(x, peths.ix[blocks.get_group(RM).index].mean(), label='cued')
+        ax.set_title('{} to {}'.format(title_map[group[0]], title_map[group[1]]))
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel('Rate (spikes/s)')
+        ax.legend(loc='best')
+        
+    fig.tight_layout()
+
+    return fig, axes
+
+def trajectory_rasters(trial_data, prange=(-2,1), figsize=(7,6), marker='|', markersize=30):
+    fig, axes = plt.subplots(nrows=2, ncols=2, figsize=figsize)
+
+    title_map = { LEFT:'left', RIGHT:'right' }
+
+    grouped = trial_data.groupby(['PG port', 'FG port'])
+    for ax, (group, values) in zip(axes.flatten(), grouped):
+        blocks = values.groupby('block')
+        wm = blocks.get_group(WM)
+        rm = blocks.get_group(RM)
+        
+        wm_spikes = np.concatenate([ times for times in wm['timestamps'] ])
+        rm_spikes = np.concatenate([ times for times in rm['timestamps'] ])
+        
+        wm_ys = np.concatenate([np.ones(len(stamps))*ii 
+                                for ii, stamps in enumerate(wm['timestamps'])])
+        rm_ys = np.concatenate([np.ones(len(stamps))*ii 
+                                for ii, stamps in enumerate(rm['timestamps'])])
+        rm_ys = rm_ys + len(wm)
+        
+        ax.scatter(wm_spikes, wm_ys, marker=marker, color='k', s=markersize)
+        ax.scatter(rm_spikes, rm_ys, marker=marker, color=(.3,.3,.3), s=markersize)
+        ax.set_title('{} to {}'.format(title_map[group[0]], title_map[group[1]]))
+        ax.set_xlabel('Time (s)')
+        ax.set_ylabel('Trials')
+        ax.set_xlim(*prange)
+        
+    fig.tight_layout()
+
+    return fig, axes
+
+@passed_or_new_ax
+def ordered_unit_array(df, ax=None, figsize=(6,5), aspect='auto'):
+
+    #fig, ax = plt.subplots(figsize=figsize)
+    img = ax.imshow(df, cmap=plt.cm.RdBu_r, aspect=aspect, interpolation='nearest')
+    xticks = range(0,len(df.columns), len(df)/6)
+    ax.set_xticks(xticks)
+    ax.set_xticklabels(df.columns.values[xticks].astype(float).round(2))
+    ax.set_yticks(range(len(df)))
+    ax.set_yticklabels('')
+    ax.set_ylabel('Units')
+    ax.set_xlabel('Time (seconds)')
+    delta = np.diff(df.columns.values).astype(float).mean()
+    zero = (0.0-df.columns.values[0]/delta).round(1) + 0.5
+    ax.plot([zero]*2, [-0.5,len(df)-0.5], '-', color='k')
+    ax.grid(False)
+    ax.tick_params(axis='y', length=0)
+    
+    return img, ax
 
 def confidence_sig(xerr, yerr):
     ''' Returns a dictionary indicating significant data points, significance

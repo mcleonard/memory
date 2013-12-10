@@ -1,4 +1,9 @@
 import numpy as np
+import pandas as pd
+import os
+import cPickle as pkl
+from spikesort.cluster import load_clusters
+import bhv
 
 class Timelock(object):
     ''' A class to timelock spike timestamps to an event. 
@@ -16,61 +21,45 @@ class Timelock(object):
     
     def __init__(self, unit_list):
         
-        self.units = unit_list
-        self._setup()
+        self.units = { unit.id:unit for unit in unit_list }
+        
+        sessions = np.unique([unit.session for unit in self.units.itervalues()])
+        self._sessions = sessions
+        self._rawdata = self._setup()
+        self._locked = dict.fromkeys(sessions)
 
     def _setup(self):
-        
-        import bhv
-        from os.path import expanduser
-        from itertools import izip
-        from scipy import unique
-        
-        sessions = unique([unit.session for unit in self.units])
-        self._sessions = sessions
-        self._rawdata = dict.fromkeys(sessions)
-        
-        for session in sessions:
-            
-            datadir = expanduser(session.path)
-            # We might might be looking at all the units in this session
-            session_units = [ unit for unit in self.units if unit in session.units ]
-            tetrodes = unique([unit.tetrode for unit in session_units])
-            
-            data = _load_data(datadir, tetrodes)
-            
-            # Get all the processed behavior data from a Rat object
-            bdata = data['bhv']
-            trial_data = bhv.build_data(bdata)
-            
-            # Keep only the behavior trials we have neural data for
-            sync = data['syn'].map_n_to_b_masked
-            trial_data = trial_data.ix[sync.data[~sync.mask]]
-            
-            # Get the onsets from the neural data
-            samp_rate = 30000.0
-            n_onsets = data['ons'][~sync.mask]/samp_rate
-            trial_data['n_onset'] = n_onsets
-            
-            for tetrode in tetrodes:
-            
-                units = [ unit for unit in session_units if unit.tetrode == tetrode ]
-                clusters = [ data['cls'][tetrode][unit.cluster] for unit in units ]
-                # Using izip saves memory!
-                packed = izip(units, clusters)
-                
-                # For each trial, we want to grab all the spikes between PG and FG,
-                # plus 30 seconds on either side
-                for unit, cluster in packed:
-                    times = _get_times(cluster['peaks'], trial_data)
-                    trial_data[unit.id] = times
-                
+
+        processed = dict.fromkeys(self._sessions)
+
+        for session in self._sessions:
+
+            data = _load_session_data(session)
+            trial_data = _build_trial_data(data)
+
+            unit_map = {(u.tetrode, u.cluster):u.id for u in session.units}
+            sync = trial_data['onset'] - trial_data['n_onset']
+
+            for tetrode in data['cls']:
+                clusters = data['cls'][tetrode]
+                for cluster in clusters:
+                    times = clusters[cluster]['times']
+                    timestamps = []
+                    for ii in trial_data.index:
+                        low = times-30 < trial_data['n_onset'][ii]
+                        high = times+30 > trial_data['n_onset'][ii]
+                        timestamps.append(times[np.where(low*high)] + sync[ii])
+                    unit_id = unit_map[tetrode, cluster]
+                    trial_data[unit_id] = pd.Series(timestamps, index=trial_data.index)
+
             # Get rid of all trials that take too long, setting it to 20 seconds
             delay_limit = 20
             delay = trial_data['C in'] - trial_data['PG in']
             trial_data = trial_data[delay < delay_limit]
         
-            self._rawdata[session] = trial_data
+            processed[session] = trial_data
+
+        return processed
             
     def lock(self,event):
         '''  Sets t = 0 s for spike timestamps to the time of the event in that
@@ -117,20 +106,55 @@ class Timelock(object):
     
         return self
     
-    def get(self, unit):
-        ''' Returns data for the given unit. '''
+    def __getitem__(self, unit_id):
+        ''' Returns data for the given unit id. '''
+        unit = self.units[unit_id]
         # Return everything except the first trial because it's junk
         data = self._locked[unit.session][1:]
         data['timestamps'] = data[unit.id]
         spikecols = data.columns[[type(col)==type(1) for col in data.columns ]]
         return data.drop(spikecols, axis=1)
-    
+
     def __repr__(self):
         
         if hasattr(self, 'event'):
             return "Sessions %s locked to %s" % (self._sessions, self.event)
         else:
             return "Not locked yet"
+
+def timelock(units):
+    return Timelock(units)
+
+
+def _load_session_data(session):
+    rat = session.rat
+    date = ''.join(session.date.isoformat().split('-'))[2:]
+    tetrodes = np.unique([unit.tetrode for unit in session.units])
+    data_dir = os.path.expanduser(session.path)
+    ext = ['bhv', 'cls', 'syn', 'ons']
+    data = dict.fromkeys(ext)
+    for each in ext:
+        if each == 'cls':
+            data[each]={tetrode:None for tetrode in tetrodes}
+            for tetrode in tetrodes:
+                filepath = os.path.join(data_dir, '{}_{}.{}.{}'.format(rat, date, each, tetrode))
+                data[each][tetrode] = load_clusters(filepath)
+        else:
+            filepath = os.path.join(data_dir, '{}_{}.{}'.format(rat, date, each))
+            with open(filepath) as f:
+                data[each] = pkl.load(f)
+    
+    return data
+
+def _build_trial_data(loaded_data):
+    bdata = bhv.build_data(loaded_data['bhv'])
+    sync = loaded_data['syn'].map_n_to_b_masked
+    trial_data = bdata.ix[sync.data[~sync.mask]]
+    samp_rate = 30000.0
+    n_onsets = loaded_data['ons'][~sync.mask]/samp_rate
+    trial_data['n_onset'] = n_onsets
+    
+    return trial_data
 
 def _load_data(datadir, tetrodes):
     
@@ -167,25 +191,3 @@ def _load_data(datadir, tetrodes):
                 raise Exception, '%s file wasn\'t loaded properly' % key
     
     return data
-    
-def _get_times(timestamps, trial_data):
-    from matplotlib.mlab import find
-    out_times = []
-    if type(timestamps) != type(1):
-        for ii, trial in trial_data.iterrows():
-            
-            low = trial['n_onset'] - (trial['onset'] - trial['PG in'])
-            high = trial['n_onset'] + (trial['onset'] - trial['FG in'])
-            
-            in_window = find((timestamps > (low-30)) & (timestamps < (high+30)))
-            stamps = sorted(timestamps[in_window])
-            
-            # And align the neural time stamps with the behavior time stamps
-            stamps = stamps + np.abs(trial['n_onset']-trial['onset'])
-            out_times.append(stamps)
-        
-        return out_times
-    else:
-        return None
-    
-    

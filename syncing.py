@@ -2,14 +2,16 @@
 after spike sorting, before timelocking.  Cheers!
 '''
 
-import bcontrol 
-import DataSession 
-import AudioTools 
+from matplotlib.mlab import find
 import ns5
 import numpy as np
 import pickle as pkl
 import os
-from matplotlib.mlab import find
+import sys
+
+import bcontrol
+import DataSession
+import AudioTools
 
 # Need to create this class to work with the syncing algorithm
 class Onsets(object):
@@ -18,8 +20,8 @@ class Onsets(object):
 
 # Nov. 9, 2012...  Rewriting this to sync all of my data at once
 
-ratname = 'ALY1A'
-topdir = '/home/mat/Dropbox/Working-memory'
+ratname = sys.argv[1]
+topdir = os.environ['HOME'] + '/Dropbox/Data'
 NDAQ = '/media/hippocampus/NDAQ'
 filelist = os.listdir(os.path.join(topdir,ratname))
 

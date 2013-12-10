@@ -1,10 +1,5 @@
 ''' Behavior data analysis '''
 
-import bcontrol
-import numpy as np
-from matplotlib.mlab import find
-from pandas import Series, DataFrame
-
 # Defining constants here
 # These might change but probably not, but just be aware
 CHOICE_TIME_UP = 3
@@ -14,6 +9,11 @@ LEFT = 1
 RIGHT = 2
 RM = 1
 WM = 2
+
+import bcontrol
+import numpy as np
+from matplotlib.mlab import find
+from pandas import Series, DataFrame
 
 def get_trials_data(Session):
     ''' Accepts a Session from a Catalog and returns the behavior data in a
@@ -87,15 +87,12 @@ def build_data(bdata):
     trials['onset'] = bdata['onsets']
     
     from itertools import izip
-    # Since I'll need the times from the current trial and the previous trial...
-    iterpeh = izip(bdata['peh'], bdata['peh'][1:])
     trial = 1
     # I'm making a decision to skip the first trial since it is worthless
-    for previous, current in iterpeh:
+    for previous, current in izip(bdata['peh'], bdata['peh'][1:]):
         
         trials['PG in'][trial] = np.nanmax(previous['states']['choosing_side'])
         
-        #1/0
         if trials['PG response'][trial] == LEFT:
             trials['PG out'][trial] = np.nanmax(previous['pokes']['L'])
         elif trials['PG response'][trial] == RIGHT:

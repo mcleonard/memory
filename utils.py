@@ -50,7 +50,7 @@ def catalog_path(absolute = None):
         absolute = expanduser('~/Dropbox/Data/catalog.sqlite')
     return '/'+relpath(absolute)
 
-def startup():
+def startup(exclude=None):
     ''' This function runs code that I do really often when I'm looking at data.
         I wrote this so I don't have to type it out every time.
         
@@ -58,7 +58,7 @@ def startup():
         -------
         catalog, units, Timelock
     '''
-    from catalog import Catalog, Unit
+    from spikesort.catalog import Catalog
     from os.path import expanduser
     
     catalog = Catalog(catalog_path())
@@ -66,8 +66,10 @@ def startup():
                    .filter(Unit.rate >= 0.5) \
                    .filter(Unit.cluster != 0) \
                    .all()
-    #good_units = [13,14,16,20,25,26,40,50,53,55,58,60,61,62,64,66,67]
-    #units = [ catalog[id] for id in good_units ]
+    if exclude:
+        for unit_id in exclude:
+            units.remove(catalog[unit_id])
+        
     lkr = my.Timelock(units)
-    data = lkr.lock('onset').get(units[0])
+    lkr.lock('onset')
     return catalog, units, lkr

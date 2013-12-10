@@ -1,7 +1,10 @@
 '''  Module for stats including:
      bootstrapping, jacknife, Mann-Whitney, ... '''
 
+import matplotlib.pyplot as plt
 import numpy as np
+from statsmodels.formula.api import ols
+from statsmodels.stats.anova import anova_lm
 
 def permutation_test(estimate, values, null_func, iters = 2000):
     ''' Performs a permutation test to determine the probability that you
@@ -12,9 +15,9 @@ def permutation_test(estimate, values, null_func, iters = 2000):
     null = null_func(values, iters)
     
     if estimate>=0:
-        p = np.sum(null>estimate)/float(len(null))
+        p = np.sum(null>=estimate)/float(len(null))
     elif estimate<0:
-        p = np.sum(null<estimate)/float(len(null))
+        p = np.sum(null<=estimate)/float(len(null))
     
     return null, p
 
@@ -58,18 +61,29 @@ def null_two_samples(func, values, iters):
     
     return null
     
-
-def constrain_FDR(p_values, level = 0.05):
+def constrain_FDR(p_values, q_level = 0.05, p_level = 0.05):
     ''' Gives the p-value threshold to reject the null hypotheses for the 
         given p-values constraining the false detection rate to be less 
-        than the given level.
+        than the given q_level.  If the constrained p is larger than p_level,
+        p_level will be returned.
     '''
-    m = float(len(p_values))
-    max = np.where([p_values[k] < k/m*level for k in range(int(m))])[0].max()
     
-    p = np.min([p_values[max], level])
+    ps = p_values.copy()
+    ps.sort()
+    m = float(len(ps))
+    try: 
+        # Use Benjamini-Hochberg method
+        max_p = np.max(np.where([p < k/m*q_level 
+                                 for k, p in enumerate(ps, start=1)]))
+        p_limit = np.min([ps[max_p], p_level])
+    except ValueError:
+        # Use Bonferroni method instead if it doesn't work
+        p_limit = bonferroni(ps)
     
-    return p
+    return p_limit
+
+def bonferroni(ps):
+    return 0.05*len(ps)**-1
 
 def ranksum(samp1, samp2):
     ''' Calculates the U statistic and probability that the samples are from
@@ -226,10 +240,10 @@ class Bootstrapper(object):
         self.sample2 = s2
         self.func = stat_func
         self.iters = iters
-        if s2 == None:
-            self.dist = bootstrap(s1, stat_func, iters)
+        if s2 is None:
+            self.dist = _bootstrap(s1, stat_func, iters)
         else:
-            self.dist = bootstrap_2samp(s1, s2, stat_func, iters)
+            self.dist = _bootstrap_2samp(s1, s2, stat_func, iters)
         self.dist.sort()
     
     def mean(self):
@@ -296,10 +310,20 @@ class Bootstrapper(object):
         from matplotlib.mlab import prctile
         return prctile(self.dist, p = p)
         
+    def hist(self, **kwargs):
+        counts, edges = np.histogram(self.dist, **kwargs)
+        fig, ax = plt.subplots()
+        ax.bar(edges[:-1], counts, width=edges[1]-edges[0], color='steelblue')
+
+        return fig, ax
+
     def __repr__(self):
         return "<Bootstrapper(B={})>".format(self.iters)
 
-def bootstrap(s1, stat_func, iters = 200, verbose=False):
+def bootstrap(s1, stat_func = np.mean, s2 = None, iters = 200):
+    return Bootstrapper(s1, stat_func, s2, iters)
+
+def _bootstrap(s1, stat_func, iters = 200, verbose=False):
     ''' Compute the distribution of a statistic (mean, variance, etc.)
         using the bootstrapping method, sampling with replacement.
         
@@ -328,7 +352,7 @@ def bootstrap(s1, stat_func, iters = 200, verbose=False):
     
     return np.array(out)
     
-def bootstrap_2samp(s1, s2, stat_func, iters=200, verbose=False):
+def _bootstrap_2samp(s1, s2, stat_func, iters=200, verbose=False):
     ''' Compute the distribution of a statistic (mean, variance, etc.)
         using the bootstrapping method, sampling with replacement.
         
