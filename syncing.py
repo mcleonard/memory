@@ -44,7 +44,7 @@ for date in dates:
     bfile_name = dir_list[find(['.mat' in file for file in dir_list])]
     
     behave_file = os.path.join(topdir,ratname,date,bfile_name)
-    neural_file = os.path.join(NDAQ,'datafile_ML_%(ratname)s_%(date)s_001.ns5' % locals()) 
+    neural_file = os.path.join(NDAQ,'datafile_ML_%(ratname)s_%(date)s_003.ns5' % locals()) 
     save_as = os.path.join(data_dir,'%(ratname)s_%(date)s' % locals())
 
     loader = ns5.Loader(neural_file)
@@ -54,8 +54,8 @@ for date in dates:
     audio = [ loader.get_analog_channel_as_array(n) for n in [7,8] ] 
     audio = np.array(audio)*4096./2**16
         
-    onsets_obj = AudioTools.OnsetDetector(audio, verbose = True, 
-        minimum_threshhold=-20)
+    onsets_obj = AudioTools.OnsetDetector(audio, verbose=True, 
+                                          minimum_threshhold=-20)
     onsets_obj.execute()
     n_onsets = Onsets(onsets_obj.detected_onsets)
 

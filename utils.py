@@ -4,6 +4,7 @@ import numpy as np
 from functools import wraps
 import matplotlib.pyplot as plt   
 import memory as my 
+from matplotlib.ticker import MaxNLocator
 
 def line_hist(data, **kwargs):
     ''' Plot a histogram as a line plot instead of a bar plot.  Accepts any keyword 
@@ -73,3 +74,36 @@ def startup(exclude=None):
     lkr = my.Timelock(units)
     lkr.lock('onset')
     return catalog, units, lkr
+
+def pub_format(ax, legend=None, spine_width=1.3, spine_color='#111111', 
+               hide_spines=['top', 'right'], yticks=6, xticks=5):
+    """ Format plots for publication. """
+    if hide_spines is None:
+        pass
+    else:
+        for each in hide_spines:
+            ax.spines[each].set_color('w')
+    ax.set_axis_bgcolor('w')
+    
+    shown_spines = [each for each in ['top', 'bottom', 'left', 'right'] if each not in hide_spines]
+    for each in shown_spines:
+        ax.spines[each].set_linewidth(spine_width)
+        ax.spines[each].set_color(spine_color)
+    
+    ax.yaxis.set_major_locator(MaxNLocator(yticks))
+    ax.xaxis.set_major_locator(MaxNLocator(xticks))
+    ax.xaxis.set_minor_locator(MaxNLocator(xticks*4))
+    ax.yaxis.set_minor_locator(MaxNLocator(yticks*2))
+    
+    ax.tick_params(axis='both', which='minor', length=3, width=1.3, 
+                   direction='out', colors='#111111')
+    ax.tick_params(which='both', **dict(zip(hide_spines, ['off']*len(hide_spines))))
+    ax.tick_params(direction='out', width=spine_width, color=spine_color)
+    ax.grid(which='both', b=False)
+
+    if legend:
+        leg_frame = legend.get_frame()
+        leg_frame.set_facecolor('w')
+        leg_frame.set_edgecolor('none')
+    
+    return ax

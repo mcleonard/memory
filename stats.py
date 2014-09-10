@@ -3,13 +3,17 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
-from statsmodels.formula.api import ols
-from statsmodels.stats.anova import anova_lm
 
 def permutation_test(estimate, values, null_func, iters = 2000):
     ''' Performs a permutation test to determine the probability that you
         would get the estimate from the values by calculating the null
         distribution for the estimated statistic.
+
+        Arguments
+        ---------
+        values : 2d array-like
+            a 2d list \ tuple \ array (2 rows if an array) containing data for 
+            two sampled distributions
     '''
     
     null = null_func(values, iters)
@@ -61,25 +65,24 @@ def null_two_samples(func, values, iters):
     
     return null
     
-def constrain_FDR(p_values, q_level = 0.05, p_level = 0.05):
+def constrain_FDR(p_values, q_level = 0.05):
     ''' Gives the p-value threshold to reject the null hypotheses for the 
         given p-values constraining the false detection rate to be less 
-        than the given q_level.  If the constrained p is larger than p_level,
-        p_level will be returned.
+        than the given q_level.
     '''
     
     ps = p_values.copy()
     ps.sort()
     m = float(len(ps))
-    try: 
-        # Use Benjamini-Hochberg method
-        max_p = np.max(np.where([p < k/m*q_level 
-                                 for k, p in enumerate(ps, start=1)]))
-        p_limit = np.min([ps[max_p], p_level])
-    except ValueError:
-        # Use Bonferroni method instead if it doesn't work
-        p_limit = bonferroni(ps)
     
+    try:
+        max_p = np.max(np.where([p < k/m*q_level 
+                                for k, p in enumerate(ps, start=1)]))
+        p_limit = ps[max_p]
+    except ValueError:
+        print('B-H method failed, reverting to Bonferroni')
+        p_limit = bonferroni(ps)
+
     return p_limit
 
 def bonferroni(ps):
@@ -248,7 +251,7 @@ class Bootstrapper(object):
     
     def mean(self):
         ''' Returns the mean of the bootstrapped statistic '''
-        return np.mean(self.dist)
+        return np.nanmean(self.dist)
         
     def median(self):
         ''' Returns the median of the bootstrapped statistic '''

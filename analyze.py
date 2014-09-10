@@ -1,3 +1,5 @@
+from collections import namedtuple
+
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -81,7 +83,7 @@ def batch_rate_differences(unit_dict, mem=WM, goal='FG', interval='Late',
 
     return df
 
-def smooth(trialData, width=0.1, prange = (-5,5)):
+def smooth(trialData, width=0.1, limit=(-2,2)):
     ''' Smoothes the unit spiking data by replacing every spike with a gaussian.
         Not convinced this is faster than doing a fftconvolve, but okay.
         Arguments:
@@ -90,40 +92,49 @@ def smooth(trialData, width=0.1, prange = (-5,5)):
         range : 2 element tuple
             range over which to return the smoothed spikes
     '''
-    
-    # This returns arrays a binary spike train with 1 ms bins
-    trains = spike_trains(trialData, prange=prange)
-    x = trains.columns.values.astype(float)
-    gaussian = lambda u: 1/width/np.sqrt(2*np.pi)*np.exp(-(x-u)**2/2/width**2)
-    smoothed = pd.DataFrame(index = trains.index, columns = trains.columns)
-    for index, train in trains.iterrows():
-        if sum(train)>0:
-            spikes = np.where(train==1)[0]
-            gausses = [ gaussian(u) for u in x[spikes] ]
-            smoothed.ix[index] = np.sum(gausses, axis=0)
-        else: smoothed.ix[index] = train
-    return smoothed
 
-def time_histogram(trialData, bin_width=0.200, prange = (-10,2)):
+    # Increasing the limit here to extend the range of the smoothing
+    trains = spike_trains(trialData, limit=(limit[0]-1, limit[1]+1))
+    
+    xs = trains.columns.values.astype(float)
+    gaussian = lambda x: np.exp(-(x)**2/2/width**2)/(width*np.sqrt(2*np.pi))
+    df = trains.apply(sp.signal.fftconvolve, axis=1, 
+                      args=(gaussian(xs),), mode='same')
+    # Reducing the data back down to the desired limits.  Basically, the
+    # smoothing makes the rate histogram fall off at the edges, so to avoid
+    # this, I smooth over a larger time range, then only return the desired
+    # time range.
+    return df[xs[(limit[0] < xs) * (xs < limit[1])]]
+
+def batch_mannwhitney(df1, df2):
+    """ Do Mann-Whitney tests for each column of two DataFrames. """
+    results = []
+    for col in df1.columns:
+        U, p = sp.stats.mannwhitneyu(*[df[col].values for df in [df1, df2]])
+        results.append(p)
+    results = np.array(results)
+    return results
+
+def time_histogram(trialData, bin_width=0.100, limit = (-2,2)):
     ''' Output is a DataFrame, time as the columns, index is trial numbers'''
     
     timestamps = trialData['timestamps']
-    nbins = np.around(np.diff(prange)[0]/bin_width).astype(int)
+    nbins = np.around(np.diff(limit)[0]/bin_width).astype(int)
     _, x = np.histogram(timestamps.ix[timestamps.index[0]], 
-                        bins = nbins, range = prange)
+                        bins = nbins, range = limit)
     columns = x[:-1]
     rateFrame = pd.DataFrame(index = trialData.index, 
                              columns = columns, dtype=float)
     for ind, times in timestamps.iteritems():
-        count, x = np.histogram(times, bins = nbins, range = prange)
+        count, x = np.histogram(times, bins = nbins, range = limit)
         rate = count/bin_width
         rateFrame.ix[ind] = rate
     return rateFrame
 
-def spike_trains(trialData, prange = (-20,2)):
+def spike_trains(trialData, limit = (-2,2)):
     ''' Returns a binary spike train.  '''
     
-    train = time_histogram(trialData, bin_width = 0.001, prange = prange)
+    train = time_histogram(trialData, bin_width = 0.001, limit = limit)
     train = train/1000.0
     return train
 

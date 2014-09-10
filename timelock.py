@@ -26,7 +26,7 @@ class Timelock(object):
         sessions = np.unique([unit.session for unit in self.units.itervalues()])
         self._sessions = sessions
         self._rawdata = self._setup()
-        self._locked = dict.fromkeys(sessions)
+        self.locked_data = dict.fromkeys(sessions)
 
     def _setup(self):
 
@@ -79,7 +79,7 @@ class Timelock(object):
         
         '''
         
-        self._locked = dict.fromkeys(self._sessions)
+        self.locked_data = dict.fromkeys(self._sessions)
         for session in self._sessions:
             
             self.event = event
@@ -102,7 +102,7 @@ class Timelock(object):
                 trial_data[column] = trial_data[column] - tzero
             trial_data[event] = 0
             
-            self._locked[session] = trial_data
+            self.locked_data[session] = trial_data
     
         return self
     
@@ -110,7 +110,7 @@ class Timelock(object):
         ''' Returns data for the given unit id. '''
         unit = self.units[unit_id]
         # Return everything except the first trial because it's junk
-        data = self._locked[unit.session][1:]
+        data = self.locked_data[unit.session][1:]
         data['timestamps'] = data[unit.id]
         spikecols = data.columns[[type(col)==type(1) for col in data.columns ]]
         return data.drop(spikecols, axis=1)
@@ -118,13 +118,12 @@ class Timelock(object):
     def __repr__(self):
         
         if hasattr(self, 'event'):
-            return "Sessions %s locked to %s" % (self._sessions, self.event)
+            return "{} sessions locked to {}".format(len(self._sessions), self.event)
         else:
             return "Not locked yet"
 
 def timelock(units):
     return Timelock(units)
-
 
 def _load_session_data(session):
     rat = session.rat

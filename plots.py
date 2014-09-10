@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 
 import analyze
+import stats
 from constants import *
 
 def passed_or_new_ax(func):
@@ -217,8 +218,8 @@ def trajectories(trialData, interval, mem, legend_loc=(0.5,2.0)):
     fig.tight_layout()
     return ax
 
-def raster(trialData, events=['PG in', 'FG in'], 
-           ax=None, sort_by='PG in', prange = None, figsize=(8,7)):
+def raster(trialData, events=['PG in', 'FG in'], markersize=10,
+           ax=None, sort_by='PG in', limit = None, figsize=(8,7)):
     """ A function that creates a raster plot from the units' trial data 
     
     Arguments
@@ -239,8 +240,8 @@ def raster(trialData, events=['PG in', 'FG in'],
     sort_by : string
         Column in trialData that the trials with be sorted by
     
-    prange : tuple of size 2
-        Plots from time prange[0] to time prange[1] (in seconds)
+    limit : tuple of size 2
+        Plots from time limit[0] to time limit[1] (in seconds)
         
     Returns
     -------
@@ -262,27 +263,28 @@ def raster(trialData, events=['PG in', 'FG in'],
     # Plotting the data
     if ax is None:
         fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
 
-    ax.scatter(spikes, ys, c = 'k', marker = '|', s = 5) 
+    ax.scatter(spikes, ys, c = 'k', marker = '|', s = markersize) 
     for event, data in events_dict.iteritems():  # Plot the event times
         ax.scatter(data, np.arange(0,len(data)), c=event_colors[event],
                    edgecolor = 'none', marker='o')
     ax.plot([0,0], [0,len(srtdata)], color = 'grey') 
-    if prange == None:
+    if limit == None:
         ax.set_xlim(srtdata['PG in'].mean()-3, srtdata['FG in'].mean()+1)
     else:
-        ax.set_xlim(prange)
+        ax.set_xlim(limit)
     ax.set_ylim(0,len(data))
-    ax.set_ylabel('Trial')
-    ax.set_xlabel('Time (s)')
+    #ax.set_ylabel('Trial')
+    #ax.set_xlabel('Time (s)')
     ax.grid(False)
 
-    fig.tight_layout()
     return fig, ax
     
-def basic_figs(trial_data, bin_width=0.2, prange=(-10,3), smooth = False, figsize=(8,7)):
+def basic_figs(trial_data, bin_width=0.2, limit=(-10,3), smooth = False, figsize=(8,7)):
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=figsize)
-    all_peths = analyze.time_histogram(trial_data, bin_width=bin_width, prange=prange)
+    all_peths = analyze.time_histogram(trial_data, bin_width=bin_width, limit=limit)
     if smooth:
         all_peths = smooth(all_peths)
     x = all_peths.columns.values
@@ -311,14 +313,14 @@ def basic_figs(trial_data, bin_width=0.2, prange=(-10,3), smooth = False, figsiz
         
     fig.tight_layout()
 
-def trajectory_peths(trial_data, prange=(-2,1), bin_width=0.05, figsize=(7,6)):
+def trajectory_peths(trial_data, limit=(-2,1), bin_width=0.05, figsize=(7,6)):
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=figsize)
     title_map = { LEFT:'left', RIGHT:'right' }
 
     grouped = trial_data.groupby(['PG port', 'FG port'])
     for ax, (group, values) in zip(axes.flatten(), grouped):
         blocks = values.groupby('block')
-        peths = analyze.time_histogram(values, prange=prange, bin_width=bin_width)
+        peths = analyze.time_histogram(values, limit=limit, bin_width=bin_width)
         x = peths.columns.values
         ax.plot(x, peths.ix[blocks.get_group(WM).index].mean(), label='uncued')
         ax.plot(x, peths.ix[blocks.get_group(RM).index].mean(), label='cued')
@@ -331,7 +333,7 @@ def trajectory_peths(trial_data, prange=(-2,1), bin_width=0.05, figsize=(7,6)):
 
     return fig, axes
 
-def trajectory_rasters(trial_data, prange=(-2,1), figsize=(7,6), marker='|', markersize=30):
+def trajectory_rasters(trial_data, limit=(-2,1), figsize=(7,6), marker='|', markersize=30):
     fig, axes = plt.subplots(nrows=2, ncols=2, figsize=figsize)
 
     title_map = { LEFT:'left', RIGHT:'right' }
@@ -356,17 +358,17 @@ def trajectory_rasters(trial_data, prange=(-2,1), figsize=(7,6), marker='|', mar
         ax.set_title('{} to {}'.format(title_map[group[0]], title_map[group[1]]))
         ax.set_xlabel('Time (s)')
         ax.set_ylabel('Trials')
-        ax.set_xlim(*prange)
+        ax.set_xlim(*limit)
         
     fig.tight_layout()
 
     return fig, axes
 
 @passed_or_new_ax
-def ordered_unit_array(df, ax=None, figsize=(6,5), aspect='auto'):
+def ordered_unit_array(df, ax=None, figsize=(6,5), aspect='auto', cm=plt.cm.RdBu_r):
 
     #fig, ax = plt.subplots(figsize=figsize)
-    img = ax.imshow(df, cmap=plt.cm.RdBu_r, aspect=aspect, interpolation='nearest')
+    img = ax.imshow(df, cmap=cm, aspect=aspect, interpolation='nearest')
     xticks = range(0,len(df.columns), len(df)/6)
     ax.set_xticks(xticks)
     ax.set_xticklabels(df.columns.values[xticks].astype(float).round(2))
@@ -478,11 +480,11 @@ def cross_scatter(x, y, xerr, yerr, p1 = None, p2 = None, **kwargs):
     
     # sigs is a dictionary with keys 'x', 'y', 'both', 'neither'
     # The values are the significant data points
-    if p1 == None:
+    if p1 is None:
         p1, p2 = (np.ones(len(x)), np.ones(len(y)))
         sig_p = 0.01
-    elif p2 == None:
-        sig_p = my.stats.constrain_FDR(p1)
+    elif p2 is None:
+        sig_p = stats.constrain_FDR(p1)
         sig_p = kwargs.get('sig_level', sig_p)
         p1, p2 = p1.copy(), p1.copy()
         # What I'm doing here is for any points above the unity line can only
@@ -491,7 +493,7 @@ def cross_scatter(x, y, xerr, yerr, p1 = None, p2 = None, **kwargs):
         p2[np.where((x-y)<0)] = 1
         p1[np.where((x-y)>0)] = 1
     else:
-        sig_p = my.stats.constrain_FDR(np.concatenate([p1,p2]))
+        sig_p = stats.constrain_FDR(np.concatenate([p1,p2]))
         sig_p = kwargs.get('sig_level', sig_p)
     
     sigs = p_value_sig(p1,p2,sig_p)

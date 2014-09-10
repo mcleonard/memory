@@ -89,7 +89,7 @@ def poisson_decoder(counts, goals, samples=4000, burn=2000, thin=2):
 
     return mcmc.trace('lambdas')[:,:]
 
-def predict_goal(count, lambdas, p, size=(1,):
+def predict_goal(count, lambdas, p, size=(1,)):
         likelihoods = poisson.pmf(count, lambdas)
         prob = np.argmax(np.array([p, 1-p])*likelihoods, axis=1).mean()
         return np.random.rand(size=size) < prob
