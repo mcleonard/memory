@@ -2,8 +2,10 @@ import numpy as np
 import pandas as pd
 import os
 import cPickle as pkl
+import json
 from spikesort.cluster import load_clusters
 import bhv
+import utils
 
 class Timelock(object):
     ''' A class to timelock spike timestamps to an event. 
@@ -23,7 +25,8 @@ class Timelock(object):
         
         self.units = { unit.id:unit for unit in unit_list }
         
-        sessions = np.unique([unit.session for unit in self.units.itervalues()])
+        sessions = np.unique([unit.session for unit in 
+                              self.units.itervalues()])
         self._sessions = sessions
         self._rawdata = self._setup()
         self.locked_data = dict.fromkeys(sessions)
@@ -34,6 +37,18 @@ class Timelock(object):
 
         for session in self._sessions:
 
+            # First, let's check if we have already loaded the data, processed 
+            # it, and saved it to file. If we have, then load it.
+            df_file = utils.filepath_from_dir(
+                             os.path.expanduser(session.path), 'ldf')
+
+            if len(df_file)==1:
+                trial_data = _load_trial_data(df_file[0])
+                processed[session] = trial_data
+                continue
+
+            # Otherwise, load the individual data files and process them into 
+            # a single dataframe.
             data = _load_session_data(session)
             trial_data = _build_trial_data(data)
 
@@ -50,10 +65,11 @@ class Timelock(object):
                         high = times+30 > trial_data['n_onset'][ii]
                         timestamps.append(times[np.where(low*high)] + sync[ii])
                     unit_id = unit_map[tetrode, cluster]
-                    trial_data[unit_id] = pd.Series(timestamps, index=trial_data.index)
+                    trial_data[unit_id] = pd.Series(timestamps, 
+                                                    index=trial_data.index)
 
-            # Get rid of all trials that take too long, setting it to 20 seconds
-            delay_limit = 20
+            # Get rid of trials that take too long
+            delay_limit = 20 #seconds
             delay = trial_data['C in'] - trial_data['PG in']
             trial_data = trial_data[delay < delay_limit]
         
@@ -84,7 +100,8 @@ class Timelock(object):
             
             self.event = event
             
-            valid_events = ['PG in', 'PG out', 'C in', 'onset', 'C out', 'FG in']
+            valid_events = ['PG in', 'PG out', 'C in', 
+                            'onset', 'C out', 'FG in']
             if event in valid_events:
                 pass
             else:
@@ -93,7 +110,8 @@ class Timelock(object):
             trial_data = self._rawdata[session].copy()
             
             # I want to subtract time zero from all the time columns
-            spikecols = trial_data.columns[[type(col)==type(1) for col in trial_data.columns ]]
+            spikecols = trial_data.columns[[type(col)==type(1) 
+                                            for col in trial_data.columns ]]
             timecolumns = valid_events[:]
             timecolumns.extend(spikecols)
             timecolumns.remove(event)
@@ -118,7 +136,8 @@ class Timelock(object):
     def __repr__(self):
         
         if hasattr(self, 'event'):
-            return "{} sessions locked to {}".format(len(self._sessions), self.event)
+            return "{} sessions locked to {}".\
+                    format(len(self._sessions), self.event)
         else:
             return "Not locked yet"
 
@@ -190,3 +209,29 @@ def _load_data(datadir, tetrodes):
                 raise Exception, '%s file wasn\'t loaded properly' % key
     
     return data
+
+def _load_trial_data(filepath):
+    with open(filepath) as f:
+        json_file = json.load(f)
+    df = pd.DataFrame.from_dict(json_file)
+    
+    # Need to make sure column labels for spike time rows are ints.
+    new_columns = []
+    for each in df.columns:
+        try:
+            new_columns.append(int(each))
+        except ValueError:
+            new_columns.append(each)
+    df.columns = new_columns
+
+    # Need to sort by index, loaded as strings though.        
+    df.index = df.index.astype(int)
+    df.sort_index(inplace=True)
+    
+    # Time stamps are loaded as lists, need to make them float arrays.
+    spikecols = df.columns[[type(col)==type(1) for col in df.columns]]
+    for each in spikecols:
+        df[each] = df[each].apply(np.array)
+
+    return df
+
