@@ -39,8 +39,9 @@ class Timelock(object):
 
             # First, let's check if we have already loaded the data, processed 
             # it, and saved it to file. If we have, then load it.
-            df_file = utils.filepath_from_dir(
-                             os.path.expanduser(session.path), 'ldf')
+            
+            datadir = os.path.expanduser(session.path)
+            df_file = utils.filepath_from_dir(datadir, 'ldf')
 
             if len(df_file)==1:
                 trial_data = _load_trial_data(df_file[0])
@@ -74,6 +75,12 @@ class Timelock(object):
             trial_data = trial_data[delay < delay_limit]
         
             processed[session] = trial_data
+
+            # Now save it to file so we don't have to process it again.
+            date =  os.path.split(datadir)[1]
+            filename = '{}_{}.ldf'.format(session.rat, date)
+            filepath = os.path.join(datadir, filename)
+            trial_data.to_json(filepath)
 
         return processed
             
