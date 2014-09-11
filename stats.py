@@ -3,6 +3,8 @@
 
 import matplotlib.pyplot as plt
 import numpy as np
+import theano.tensor as t
+import pymc as pm
 
 def permutation_test(estimate, values, null_func, iters = 2000):
     ''' Performs a permutation test to determine the probability that you
@@ -208,6 +210,54 @@ def ranksum_small(samp1, samp2):
     
     return np.min([U1, U2]), p
 
+class BootSample(object):
+    ''' A generator used for bootstrapping.  Samples with replacement from
+        a data array.
+        
+        Parameters
+        ----------
+       
+        iters : int
+            The number of iterations before the generator runs out.
+        
+        Returns
+        -------
+        out : np.array
+            Yields an np.array of pseudorandom integers.  The array
+            is max integers long, the integers are between min and max.
+    
+    '''
+    
+    
+    def __init__(self, data, iters):
+        from numpy.random import randint
+        self.randint = randint
+        self._data = data
+        if ~hasattr(self._data, 'ix'): # Checking if data is a pandas DataFrame
+            self.next = self._numpy_next 
+        else:
+            self._index = self._data.index
+            self.next = self._pandas_next 
+        
+        self._iters = iters
+        
+    def __iter__(self):
+        return self.next()
+        
+    def _numpy_next(self):
+        for ii in np.arange(self._iters):
+            # Get N random integers, N is the number of data points
+            sample = self.randint(0,len(self._data),len(self._data))
+            samp = self._data[sample]
+            yield samp
+    
+    def _pandas_next(self):
+        for ii in np.arange(self._iters):
+            # Get N random integers, N is the number of data points
+            sample = randint(0,len(self._data),len(self._data))
+            samp = self._data.ix[self._index[sample]]
+            yield samp
+
 class Bootstrapper(object):
     ''' An object for producing bootstrapped estimates.
         
@@ -387,54 +437,6 @@ def _bootstrap_2samp(s1, s2, stat_func, iters=200, verbose=False):
     
     return np.array(out)
     
-class BootSample(object):
-    ''' A generator used for bootstrapping.  Samples with replacement from
-        a data array.
-        
-        Parameters
-        ----------
-       
-        iters : int
-            The number of iterations before the generator runs out.
-        
-        Returns
-        -------
-        out : np.array
-            Yields an np.array of pseudorandom integers.  The array
-            is max integers long, the integers are between min and max.
-    
-    '''
-    
-    
-    def __init__(self, data, iters):
-        from numpy.random import randint
-        self.randint = randint
-        self._data = data
-        if ~hasattr(self._data, 'ix'): # Checking if data is a pandas DataFrame
-            self.next = self._numpy_next 
-        else:
-            self._index = self._data.index
-            self.next = self._pandas_next 
-        
-        self._iters = iters
-        
-    def __iter__(self):
-        return self.next()
-        
-    def _numpy_next(self):
-        for ii in np.arange(self._iters):
-            # Get N random integers, N is the number of data points
-            sample = self.randint(0,len(self._data),len(self._data))
-            samp = self._data[sample]
-            yield samp
-    
-    def _pandas_next(self):
-        for ii in np.arange(self._iters):
-            # Get N random integers, N is the number of data points
-            sample = randint(0,len(self._data),len(self._data))
-            samp = self._data.ix[self._index[sample]]
-            yield samp
-
 def jackknife(data, stat_func, d=1):
     ''' Function used to jackknife data
     
@@ -500,3 +502,29 @@ def _crit_u(size1, size2):
         [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,317]]).astype(int)
     
     return crits[size1-3,size2-5]
+
+def poisson_regression(targets, predictors, iters=2000):
+    """ Return the posterior of a Bayesian Poisson regression model.
+
+        This function takes the targets and predictors and builds a Poisson
+        regression model. The predictor coefficients are found by sampling
+        from the posterior using PyMC (NUTS in particular).
+
+        The posterior is returned as an MxN array, where M is the number of
+        samples and N is the number of predictors. The first column is the 
+        coefficient for the first predictor and so on.
+
+    """
+    with pm.Model() as poisson_model:
+        # priors for coefficients
+        coeffs = pm.Normal('coeffs', 0, sd=1, shape=(1, predictors.shape[1]))
+        
+        p = t.exp(pm.sum(coeffs*predictors.values, 1))
+        
+        obs = pm.Poisson('obs', p, observed=targets)
+
+        start = pm.find_MAP()
+        step = pm.NUTS(scaling=start)
+        poisson_trace = pm.sample(iters, step, start=start, progressbar=False)
+
+    return poisson_trace['coeffs'].squeeze()
