@@ -115,21 +115,21 @@ def batch_mannwhitney(df1, df2):
     results = np.array(results)
     return results
 
-def time_histogram(trialData, bin_width=0.100, limit = (-2,2)):
-    ''' Output is a DataFrame, time as the columns, index is trial numbers'''
+def time_histogram(trialData, bin_width=0.100, limit = (-1,1)):
+    ''' Output is a DataFrame, the index are trial numbers, the columns are
+        the bin times (left edges)
+    '''
     
     timestamps = trialData['timestamps']
+    ntrials = len(trialData)
     nbins = np.around(np.diff(limit)[0]/bin_width).astype(int)
-    _, x = np.histogram(timestamps.ix[timestamps.index[0]], 
-                        bins = nbins, range = limit)
-    columns = x[:-1]
-    rateFrame = pd.DataFrame(index = trialData.index, 
-                             columns = columns, dtype=float)
-    for ind, times in timestamps.iteritems():
-        count, x = np.histogram(times, bins = nbins, range = limit)
-        rate = count/bin_width
-        rateFrame.ix[ind] = rate
-    return rateFrame
+    binned = timestamps.apply(lambda x: np.histogram(x, 
+                                           bins=nbins, range=limit)[0])
+    binned = np.concatenate(binned.values).reshape(ntrials, nbins)
+    df = pd.DataFrame(data=binned, index=timestamps.index, 
+                      columns=np.linspace(*limit, num=nbins+1)[:-1])
+
+    return df
 
 def spike_trains(trialData, limit = (-2,2)):
     ''' Returns a binary spike train.  '''

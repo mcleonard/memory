@@ -502,29 +502,3 @@ def _crit_u(size1, size2):
         [0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,317]]).astype(int)
     
     return crits[size1-3,size2-5]
-
-def poisson_regression(targets, predictors, iters=2000):
-    """ Return the posterior of a Bayesian Poisson regression model.
-
-        This function takes the targets and predictors and builds a Poisson
-        regression model. The predictor coefficients are found by sampling
-        from the posterior using PyMC (NUTS in particular).
-
-        The posterior is returned as an MxN array, where M is the number of
-        samples and N is the number of predictors. The first column is the 
-        coefficient for the first predictor and so on.
-
-    """
-    with pm.Model() as poisson_model:
-        # priors for coefficients
-        coeffs = pm.Normal('coeffs', 0, sd=1, shape=(1, predictors.shape[1]))
-        
-        p = t.exp(pm.sum(coeffs*predictors.values, 1))
-        
-        obs = pm.Poisson('obs', p, observed=targets)
-
-        start = pm.find_MAP()
-        step = pm.NUTS(scaling=start)
-        poisson_trace = pm.sample(iters, step, start=start, progressbar=False)
-
-    return poisson_trace['coeffs'].squeeze()

@@ -84,7 +84,7 @@ class Timelock(object):
 
         return processed
             
-    def lock(self,event):
+    def lock(self, event):
         '''  Sets t = 0 s for spike timestamps to the time of the event in that
         trial 
         
@@ -133,12 +133,14 @@ class Timelock(object):
     
     def __getitem__(self, unit_id):
         ''' Returns data for the given unit id. '''
-        unit = self.units[unit_id]
+
         # Return everything except the first trial because it's junk
-        data = self.locked_data[unit.session][1:]
-        data['timestamps'] = data[unit.id]
-        spikecols = data.columns[[type(col)==type(1) for col in data.columns ]]
-        return data.drop(spikecols, axis=1)
+        data = self.locked_data[self.units[unit_id].session][1:]
+        data = data.rename(columns={unit_id:'timestamps'}, axis=1)
+        spikecols = data.columns[[type(col)==type(1) for col in data.columns]]
+        df = data.drop(spikecols, axis=1)
+        
+        return df
 
     def __repr__(self):
         
